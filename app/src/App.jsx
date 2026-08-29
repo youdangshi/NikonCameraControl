@@ -104,11 +104,11 @@ function TopBar() {
     <div className="glass-sm flex items-center justify-between px-4 py-2.5 mx-2 my-2 flex-shrink-0" style={{ borderRadius: 12 }}>
       <div className="flex items-center gap-3">
         <span className="text-base">📷</span>
-        <span className="font-bold text-sm">Nikon Control</span>
+        <span className="font-bold text-sm">实验尼康</span>
         <div className="flex items-center gap-2 pl-3 border-l border-white/10">
           <span className={`dot ${cfg.cls}`} />
           <span className="text-xs font-medium" style={{ color: cfg.col }}>{cfg.label}</span>
-          {state.connectionMode && <span className="badge badge-blue text-[10px]">{state.connectionMode === 'usb' ? '🔌 USB' : '📶 ' + state.connectionMode.toUpperCase()}</span>}
+          {state.connectionMode && <span className="badge badge-blue text-[10px]">{state.connectionMode === 'usb' ? '🔌 USB' : state.connectionMode === 'demo' ? '🔬 实验' : '📶 ' + state.connectionMode.toUpperCase()}</span>}
         </div>
       </div>
       <button className="btn-icon" onClick={() => navigate('/settings')} title="设置">⚙️</button>

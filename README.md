@@ -52,6 +52,11 @@ nikon-camera-control/
 
 ## 快速开始
 
+### 下载测试 APK
+
+当前 Release：https://github.com/youdangshi/NikonCameraControl/releases/tag/v1.0.0  
+直接下载：https://github.com/youdangshi/NikonCameraControl/releases/download/v1.0.0/NikonCameraControl-1.0.0-debug.apk
+
 ### 开发预览（可选）
 
 ```bash

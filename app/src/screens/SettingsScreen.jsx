@@ -94,7 +94,7 @@ export default function SettingsScreen() {
         </div>
         <div className="glass p-5">
           <div className="text-[11px] font-semibold text-[#9898ac] mb-3">ℹ 关于</div>
-          <div className="text-xs text-[#9898ac] space-y-1"><p className="text-[#e4e4ec] font-semibold">实验尼康 v1.0.0</p><p>Android 相机控制与修图应用</p><p>PTP/IP · Capacitor · 本地画布修图</p></div>
+          <div className="text-xs text-[#9898ac] space-y-1"><p className="text-[#e4e4ec] font-semibold">妮妮 v1.0.0</p><p>Android 相机控制与修图应用</p><p>PTP/IP · Capacitor · 本地画布修图</p></div>
         </div>
       </div>
     </div>

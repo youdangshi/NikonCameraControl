@@ -1,0 +1,70 @@
+{
+  "name": "nikon-camera-control",
+  "version": "1.0.0",
+  "description": "Nikon Z30 WiFi/USB 相机控制 — 跨平台",
+  "license": "MIT",
+  "author": "Nikon Camera Control contributors",
+  "main": "main-process/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "start": "electron .",
+    "build": "vite build && electron-builder",
+    "dist:portable": "vite build && electron-builder --win portable",
+    "dist:installer": "vite build && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "usb": "^2.14.0",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "electron": "^28.2.0",
+    "electron-builder": "^25.0.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "com.nikon.camera-control",
+    "productName": "Nikon Camera Control",
+    "directories": {
+      "output": "dist-exe"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

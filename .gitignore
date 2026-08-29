@@ -1,0 +1,80 @@
+# ============================================================
+# Nikon Camera Control — 开源上传白名单管理
+# 原则：只上传源码与公开文档；依赖、构建产物、本地路径、密钥、参考 APK 均不上传。
+# ============================================================
+
+# ── 依赖与构建产物（禁止上传） ──────────────────────────────
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+**/build/
+**/.gradle/
+.gradle/
+*.apk
+*.aab
+*.exe
+*.dmg
+*.pkg
+*.ipa
+*.zip
+*.log
+*.tmp
+*.part
+*.jar
+!app/android/gradle/wrapper/gradle-wrapper.jar
+
+# ── 本地配置与密钥（禁止上传） ──────────────────────────────
+.env
+.env.*
+!.env.example
+local.properties
+**/local.properties
+.npmrc
+.npmrc.*
+*.keystore
+*.jks
+*.p12
+*.pfx
+
+# ── Capacitor / Android 生成物（cap sync 自动重建） ─────────
+app/android/app/build/
+app/android/build/
+app/android/.gradle/
+app/android/app/src/main/assets/public/
+app/android/app/src/main/assets/capacitor.config.json
+app/android/app/src/main/assets/capacitor.plugins.json
+app/android/capacitor-cordova-android-plugins/
+app/release/
+
+# ── 遗留蓝图 / 本地工作文档（公开 v1 不传） ────────────────
+packages/
+demo/
+BUILD.md
+tsconfig.base.json
+CLAUDE.md
+CONTEXT.md
+AGENTS.md
+/package.json
+.claude/
+.codex/
+.agent-teams/
+.playwright-cli/
+docs/Nikon_Camera_Control_交接文档.docx
+docs/Nikon_Camera_Control_项目介绍.docx
+app/android/app/src/test/
+app/android/app/src/androidTest/
+
+# ── 参考 APK 反解临时目录（严禁上传） ──────────────────────
+.apk_ref/
+.apk_ref_*/
+app-release.apk*
+*.apk.1
+
+# ── IDE / 操作系统 ────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+Desktop.ini

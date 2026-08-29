@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Nikon Camera Control</string>
+    <string name="title_activity_main">Nikon Camera Control</string>
+    <string name="package_name">com.nikon.camera.control</string>
+    <string name="custom_url_scheme">com.nikon.camera.control</string>
+</resources>

@@ -15,7 +15,7 @@ Nikon Z30 相机控制 Android App（测试版）。
 ## 下载和安装
 
 1. 下载 APK：
-   https://github.com/youdangshi/NikonCameraControl/releases/tag/v1.0.0
+   https://github.com/youdangshi/NikonCameraControl/releases/tag/v1.0.1
 2. 把 APK 传到手机。
 3. 安装时如果提示未知来源，允许安装。
 4. 打开“实验尼康”。

@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.nikon.camera.control',
-  appName: 'Nikon Camera Control',
+  appName: '实验尼康',
   webDir: 'dist'
 };
 

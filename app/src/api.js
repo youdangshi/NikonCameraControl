@@ -8,7 +8,7 @@
  * capture / 参数读写 / 对焦等核心命令在原生下透明路由到 on-device 会话。
  */
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { openSession, openUsbSession, PtpIpSession, isNativeMobile } from './ptpip.js';
 import { createDemoCamera } from './demoCamera.js';
 
@@ -20,6 +20,7 @@ let listeners = {};
 let reconnectTimer = null;
 let mobileSession = null; // 原生直连会话（仅手机 App）
 let demoCam = null;       // 演示相机（无真机也能跑通）
+const UsbPtp = registerPlugin('UsbPtp');
 
 // ─── PTP 操作码 ───────────────────────────────────────
 const OC = {
@@ -274,6 +275,19 @@ export const camera = {
 
   /** 演示相机当前参数（取景界面上叠加显示） */
   demoSnapshot() { return demoCam ? demoCam.getSnapshot() : null; },
+
+  /** 手机端 USB 设备检测（Android 原生） */
+  async listUsbDevices() {
+    if (!isNativeMobile()) return { devices: [], usbHostSupported: false, native: false };
+    try {
+      return await UsbPtp.listDevices();
+    } catch (e) {
+      return { devices: [], usbHostSupported: false, error: e.message || String(e) };
+    }
+  },
+
+  /** 手机端 USB 设备插拔事件 */
+  onUsbDevices(fn) { return UsbPtp.addListener('usb_devices', fn); },
 
   /** 提交诊断日志回调（真机验证时展示握手细节） */
   onDiagnostic: (fn) => on('diagnostic', fn),

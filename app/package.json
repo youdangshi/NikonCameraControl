@@ -1,7 +1,7 @@
 {
-  "name": "nikon-camera-control",
+  "name": "shiyan-nikon",
   "version": "1.0.0",
-  "description": "Nikon Z30 WiFi/USB 相机控制 — 跨平台",
+  "description": "实验尼康 - Nikon Z30 WiFi/USB 相机控制与本地修图",
   "license": "MIT",
   "author": "Nikon Camera Control contributors",
   "main": "main-process/main.cjs",

@@ -7,7 +7,7 @@ const MODES = [
   { value: 'wifi', label: 'WiFi 热点', hint: '相机开 Wi-Fi → 手机连相机热点（如 Nikon_Z30_1234），默认地址 192.168.1.1:15740。相机无线模式需设为「允许计算机控制」。' },
   { value: 'sta', label: 'STA 局域网', hint: '相机和手机连同一个家庭 Wi-Fi，在相机无线菜单查看并输入它显示的 IP，端口默认 15740。' },
   { value: 'usb', label: 'USB Type-C', hint: '手机用 OTG 线连接相机 Type-C，相机 USB 模式选 MTP/PTP。首次连接需在手机弹出窗口允许 USB 调试/权限。' },
-  { value: 'demo', label: '演示模式', hint: '无需真机：用内置模拟相机跑通连接、实时取景、遥控拍摄、传图与修图。' },
+  { value: 'demo', label: '实验模式', hint: '无需真机：用内置模拟相机跑通连接、实时取景、遥控拍摄、传图与修图。' },
 ];
 
 export default function MyCameraScreen() {
@@ -91,7 +91,7 @@ export default function MyCameraScreen() {
             <div className="rounded-xl bg-black/35 p-3"><p className="text-[10px] text-[#9898ac]">型号</p><p className="text-sm font-semibold mt-1">Z 30</p></div>
           </div>
           <button className="btn btn-primary w-full mt-4" onClick={connected ? disconnect : connect} disabled={busy}>
-            {busy ? '⏳ 连接中…' : connected ? '断开连接' : mode === 'usb' ? '🔌 连接相机' : mode === 'demo' ? '▶ 启动演示' : '📶 连接相机'}
+            {busy ? '⏳ 连接中…' : connected ? '断开连接' : mode === 'usb' ? '🔌 连接相机' : mode === 'demo' ? '▶ 启动实验' : '📶 连接相机'}
           </button>
         </div>
 

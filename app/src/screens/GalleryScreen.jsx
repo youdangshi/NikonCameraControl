@@ -40,7 +40,7 @@ export default function GalleryScreen() {
       navigate('/editor', { state: { src: data, name: img.fileName || `DSC_${img.handle}.NEF` } });
       return;
     }
-    alert('当前照片暂未取到图片数据，请先使用演示模式或确认相机已连接。');
+    alert('当前照片暂未取到图片数据，请先使用实验模式或确认相机已连接。');
   };
 
   return (

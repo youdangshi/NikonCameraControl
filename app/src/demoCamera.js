@@ -119,9 +119,9 @@ export function createDemoCamera() {
 
     async connect() {
       state.connected = true;
-      emit('status', { state: 'session_open', mode: 'demo', host: '演示相机', port: 0 });
-      emit('camera_info', { model: 'Nikon Z30 (演示)', connection: 'Demo', ip: '本地模拟' });
-      return { success: true, model: 'Nikon Z30 (演示)' };
+      emit('status', { state: 'session_open', mode: 'demo', host: '实验尼康相机', port: 0 });
+      emit('camera_info', { model: '实验尼康 Z30 (模拟)', connection: '实验', ip: '本地模拟' });
+      return { success: true, model: '实验尼康 Z30 (模拟)' };
     },
 
     async disconnect() {

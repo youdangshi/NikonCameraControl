@@ -63,7 +63,7 @@ export default function ConnectScreen() {
           <div style={{width:72,height:72,margin:'0 auto 16px',borderRadius:20,background:'linear-gradient(135deg,#3b82f6,#7c3aed)',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 8px 32px rgba(59,130,246,0.25)'}}>
             <span className="text-3xl">📷</span>
           </div>
-          <h1 className="text-xl font-bold tracking-tight">Nikon Camera Control</h1>
+          <h1 className="text-xl font-bold tracking-tight">实验尼康</h1>
           <p className="text-sm text-[#9898ac] mt-1">Nikon Z30 无线遥控 · AI 修图 {native ? '· 手机版' : ''}</p>
           {conn && <div className="mt-3"><span className="badge badge-green text-xs">✅ 已连接 {state.connectionMode==='wifi'?'WiFi':'USB'} · 就绪</span></div>}
         </div>

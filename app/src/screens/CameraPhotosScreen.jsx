@@ -26,7 +26,7 @@ export default function CameraPhotosScreen() {
     if (data) {
       navigate('/editor', { state: { src: data, name: img.fileName || `DSC_${img.handle}.NEF` } });
     } else {
-      alert('暂未取到照片数据，请使用演示模式或确认相机连接。');
+      alert('暂未取到照片数据，请使用实验模式或确认相机连接。');
     }
   };
 

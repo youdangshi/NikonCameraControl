@@ -27,6 +27,38 @@ function loadJSON(key, fallback) {
   } catch { return fallback; }
 }
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    try { console.error('[妮妮] 页面渲染异常', error, info); } catch {}
+  }
+
+  render() {
+    if (this.state.error) {
+      const text = this.state.error?.message || String(this.state.error);
+      return (
+        <div className="h-screen w-screen bg-[#08080e] text-white flex items-center justify-center p-6">
+          <div className="glass max-w-sm w-full p-5 text-center">
+            <div className="text-4xl mb-3">⚠️</div>
+            <h1 className="text-base font-bold">页面遇到错误</h1>
+            <p className="text-xs text-[#9898ac] leading-5 mt-2 break-all">{text}</p>
+            <button className="btn btn-primary w-full mt-4" onClick={() => location.reload()}>重新打开</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export const AppContext = createContext({
   state: {
     connectionState: 'disconnected', connectedCamera: null, connectionMode: null,
@@ -57,11 +89,13 @@ export default function App() {
   }), []);
 
   return (
-    <AppContext.Provider value={{ state: st, updateState, updatePoseGuides, updateAiSettings }}>
-      <HashRouter>
-        <Shell />
-      </HashRouter>
-    </AppContext.Provider>
+    <AppErrorBoundary>
+      <AppContext.Provider value={{ state: st, updateState, updatePoseGuides, updateAiSettings }}>
+        <HashRouter>
+          <Shell />
+        </HashRouter>
+      </AppContext.Provider>
+    </AppErrorBoundary>
   );
 }
 

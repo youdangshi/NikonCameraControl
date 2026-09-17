@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App.jsx';
 import { camera } from '../api.js';
@@ -104,7 +104,7 @@ export default function MyCameraScreen() {
       updateState({ connectionState: d.state, connectionMode: d.mode });
       if (d.state === 'session_open') {
         setError(null);
-        const next = { mode: d.mode, time: Date.now(), host: d.host || host };
+        const next = { mode: d.mode, time: Date.now(), host: d.host || '' };
         setLastConn(next);
         try { localStorage.setItem('nini_last_connection', JSON.stringify(next)); } catch {}
       }
@@ -112,25 +112,24 @@ export default function MyCameraScreen() {
     const u2 = camera.on('error', e => setError(typeof e === 'string' ? e : e.error || JSON.stringify(e)));
     const u3 = camera.on('diagnostic', m => setLogs(x => [...x, m]));
     const u4 = camera.on('camera_info', info => setCurrentInfo(info));
-    let u5 = () => {};
-    try {
-      if (camera.isNative()) u5 = camera.onUsbDevices(d => {
-        setUsbDevices(d.devices || []);
-        setUsbSupport(true);
+    return () => {
+      [u1, u2, u3, u4].forEach((cleanup) => {
+        try {
+          if (typeof cleanup === 'function') cleanup();
+        } catch {}
       });
-    } catch {}
-    return () => { u1(); u2(); u3(); u4(); u5(); };
-  }, [host]);
+    };
+  }, []);
 
   const changeMode = (v) => {
     setMode(v); setError(null); setShowGuide(false);
     if (v === 'wifi') setHost('192.168.1.1');
     if (v === 'sta') setHost('');
-    if (v === 'usb') { setHost(''); detectUsb(); }
+    if (v === 'usb') setHost('');
     if (v === 'demo') setHost('');
   };
 
-  const detectUsb = async () => {
+  const detectUsb = useCallback(async () => {
     if (!camera.isNative()) {
       setUsbSupport(false);
       setUsbError('USB 设备检测需要在手机 App 中使用。');
@@ -142,10 +141,17 @@ export default function MyCameraScreen() {
       setUsbSupport(!!r.usbHostSupported);
       setUsbDevices(r.devices || []);
       if (!r.usbHostSupported) setUsbError('这台手机不支持 USB Host / OTG。');
+      else if (r.error) setUsbError(r.error);
+      else if (!(r.devices || []).length) setUsbError('没有检测到 USB 设备，请检查 OTG 数据线和相机是否已开机。');
+      else if (!r.hasNikon) setUsbError('已检测到 USB 设备，但没有识别到 Nikon 相机（VID 0x04B0）。');
     } catch (e) {
       setUsbError('USB 检测失败：' + (e.message || String(e)));
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (mode === 'usb') detectUsb();
+  }, [mode, detectUsb]);
 
   const connect = async () => {
     setBusy(true); setError(null); setLogs([]);

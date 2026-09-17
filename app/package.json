@@ -1,13 +1,15 @@
 {
   "name": "nini",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "description": "妮妮 - Nikon Z30 WiFi/USB 相机控制与本地修图",
+  "type": "module",
   "license": "MIT",
   "author": "Nikon Camera Control contributors",
   "main": "main-process/main.cjs",
   "scripts": {
     "dev": "vite",
     "start": "electron .",
+    "test:protocol": "node scripts/protocol-smoke.mjs",
     "build": "vite build && electron-builder",
     "dist:portable": "vite build && electron-builder --win portable",
     "dist:installer": "vite build && electron-builder --win nsis"

@@ -1,6 +1,17 @@
 import React, { useState, useContext } from 'react';
 import { AppContext } from '../App.jsx';
 import { camera } from '../api.js';
+import {
+  PTP_PROP,
+  EXPOSURE_PROGRAM_CODES,
+  WHITE_BALANCE_CODES,
+  METERING_CODES,
+  FOCUS_MODE_CODES,
+  DRIVE_MODE_CODES,
+  shutterLabelToMicros,
+  apertureLabelToHundredths,
+  exposureCompensationToMilliEv,
+} from '../nikonProperties.js';
 
 /* ═══════════════════════════════════════════
    标准 Nikon Z30 参数步进值
@@ -14,9 +25,7 @@ const WB_OPTIONS = [
   {v:'FLUORESCENT',n:'🔆 荧光灯'},{v:'DIRECT_SUNLIGHT',n:'☀️ 晴天'},{v:'FLASH',n:'⚡ 闪光灯'},
   {v:'CLOUDY',n:'☁️ 阴天'},{v:'SHADE',n:'🏠 阴影'},{v:'COLOR_TEMP',n:'🌡 色温'},
 ];
-const EXP_COMP_VALUES = [-5,-4.7,-4.3,-4,-3.7,-3.3,-3,-2.7,-2.3,-2,-1.7,-1.3,-1,-0.7,-0.3,0,0.3,0.7,1,1.3,1.7,2,2.3,2.7,3,3.3,3.7,4,4.3,4.7,5];
-
-function findIndex(arr, v) { const i = arr.indexOf(v); return i>=0 ? i : Math.floor(arr.length/2); }
+const EXP_COMP_VALUES = [-5,-4.666,-4.333,-4,-3.666,-3.333,-3,-2.666,-2.333,-2,-1.666,-1.333,-1,-0.666,-0.333,0,0.333,0.666,1,1.333,1.666,2,2.333,2.666,3,3.333,3.666,4,4.333,4.666,5];
 
 function StepControl({ label, value, values, format, color='#3b82f6', onChange, disabled }) {
   const idx = values ? values.indexOf(value) : -1;
@@ -59,18 +68,34 @@ export default function ControlScreen() {
   const { state } = useContext(AppContext);
   const [expMode, setExpMode] = useState('M');
   const [iso, setIso] = useState(400);
-  const [shutterI, setShutterI] = useState(37); // index into SHUTTER_LABELS: 1/125
-  const [apertureI, setApertureI] = useState(10); // index into APERTURE_LABELS: F5.6
+  const [shutterI, setShutterI] = useState(36); // index into SHUTTER_LABELS: 1/125
+  const [apertureI, setApertureI] = useState(12); // index into APERTURE_LABELS: F5.6
   const [wb, setWb] = useState('AUTO');
   const [focus, setFocus] = useState('AF-S');
   const [expCompI, setExpCompI] = useState(15); // index: 0 EV
   const [metering, setMetering] = useState('MATRIX');
+  const [drive, setDrive] = useState('S');
+  const [propError, setPropError] = useState('');
 
   const shutLabel = SHUTTER_LABELS[shutterI]||'1/125';
   const apLabel = APERTURE_LABELS[apertureI]||'F5.6';
   const ecLabel = (EXP_COMP_VALUES[expCompI]>=0?'+':'')+EXP_COMP_VALUES[expCompI]?.toFixed(1)||'0.0';
 
-  const setProp = async (code, v) => { try { await camera.setProp(code, v); } catch {} };
+  const setProp = async (code, value, label) => {
+    setPropError('');
+    try {
+      const result = await camera.setProp(code, value);
+      if (!result?.success) {
+        const codeText = result?.code != null ? `PTP 0x${Number(result.code).toString(16)}` : '无响应';
+        setPropError(`${label}写入失败（${codeText}），该机身或当前模式可能为只读`);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      setPropError(`${label}写入失败：${e.message || e}`);
+      return false;
+    }
+  };
 
   return (
     <div className="h-full overflow-auto">
@@ -84,7 +109,7 @@ export default function ControlScreen() {
                 padding:'8px 16px',borderRadius:10,fontSize:13,fontWeight:700,border:'none',cursor:'pointer',
                 background:expMode===m?'#3b82f6':'rgba(255,255,255,0.05)',color:expMode===m?'#fff':'#9898ac',
                 boxShadow:expMode===m?'0 4px 16px rgba(59,130,246,0.3)':'none',transition:'all 0.15s',
-              }} onClick={()=>setExpMode(m)}>{m}</button>
+              }} onClick={async()=>{if(expMode!==m && await setProp(PTP_PROP.ExposureProgramMode,EXPOSURE_PROGRAM_CODES[m],'曝光模式')) setExpMode(m);}}>{m}</button>
             ))}
           </div>
           <div style={{display:'flex',gap:8,alignItems:'center'}}>
@@ -96,16 +121,16 @@ export default function ControlScreen() {
         {/* 曝光三要素 */}
         <div className="grid grid-cols-3 gap-3">
           <div className="glass p-3">
-            <StepControl label="ISO" value={iso} values={ISO_VALUES} onChange={v=>{setIso(v);setProp(0x500F,v);}}
+            <StepControl label="ISO" value={iso} values={ISO_VALUES} onChange={async v=>{if(await setProp(PTP_PROP.ExposureIndex,v,'ISO')) setIso(v);}}
               disabled={expMode==='AUTO'} color="#f59e0b" />
           </div>
           <div className="glass p-3">
             <StepControl label="快门" value={shutLabel} values={SHUTTER_LABELS} format={v=>v}
-              onChange={v=>{setShutterI(SHUTTER_LABELS.indexOf(v));setProp(0x500D,v);}} disabled={expMode==='A'||expMode==='P'} color="#ef4444" />
+              onChange={async v=>{if(await setProp(PTP_PROP.ExposureTime,shutterLabelToMicros(v),'快门')) setShutterI(SHUTTER_LABELS.indexOf(v));}} disabled={expMode==='A'||expMode==='P'} color="#ef4444" />
           </div>
           <div className="glass p-3">
             <StepControl label="光圈" value={apLabel} values={APERTURE_LABELS} format={v=>v}
-              onChange={v=>{setApertureI(APERTURE_LABELS.indexOf(v));setProp(0x5007,v);}} disabled={expMode==='S'||expMode==='P'} color="#22c55e" />
+              onChange={async v=>{if(await setProp(PTP_PROP.FNumber,apertureLabelToHundredths(v),'光圈')) setApertureI(APERTURE_LABELS.indexOf(v));}} disabled={expMode==='S'||expMode==='P'} color="#22c55e" />
           </div>
         </div>
 
@@ -114,10 +139,10 @@ export default function ControlScreen() {
           <div style={{fontSize:11,fontWeight:600,color:'#9898ac',marginBottom:12}}>☀️ 曝光补偿</div>
           <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:12}}>
             <button className="btn btn-secondary px-3 text-sm"
-              onClick={()=>{const i=Math.max(0,expCompI-1);setExpCompI(i);setProp(0x5010,Math.round(EXP_COMP_VALUES[i]*1000));}}>−</button>
+              onClick={async()=>{const i=Math.max(0,expCompI-1);if(await setProp(PTP_PROP.ExposureBiasCompensation,exposureCompensationToMilliEv(EXP_COMP_VALUES[i]),'曝光补偿')) setExpCompI(i);}}>−</button>
             <span style={{fontSize:28,fontWeight:700,color:'#fbbf24',fontFamily:'JetBrains Mono,monospace',minWidth:80,textAlign:'center'}}>{ecLabel}<span style={{fontSize:12,color:'#9898ac',marginLeft:4}}>EV</span></span>
             <button className="btn btn-secondary px-3 text-sm"
-              onClick={()=>{const i=Math.min(EXP_COMP_VALUES.length-1,expCompI+1);setExpCompI(i);setProp(0x5010,Math.round(EXP_COMP_VALUES[i]*1000));}}>+</button>
+              onClick={async()=>{const i=Math.min(EXP_COMP_VALUES.length-1,expCompI+1);if(await setProp(PTP_PROP.ExposureBiasCompensation,exposureCompensationToMilliEv(EXP_COMP_VALUES[i]),'曝光补偿')) setExpCompI(i);}}>+</button>
           </div>
         </div>
 
@@ -125,13 +150,13 @@ export default function ControlScreen() {
         <div className="grid grid-cols-2 gap-3">
           <div className="glass p-4">
             <div style={{fontSize:11,fontWeight:600,color:'#9898ac',marginBottom:10}}>🎨 白平衡</div>
-            <select className="select w-full text-xs" value={wb} onChange={e=>{setWb(e.target.value);setProp(0x5005,{AUTO:2,INCANDESCENT:4,FLUORESCENT:5,DIRECT_SUNLIGHT:6,FLASH:7,CLOUDY:8,SHADE:9,COLOR_TEMP:12}[e.target.value]);}}>
+            <select className="select w-full text-xs" value={wb} onChange={async e=>{if(await setProp(PTP_PROP.WhiteBalance,WHITE_BALANCE_CODES[e.target.value],'白平衡')) setWb(e.target.value);}}>
               {WB_OPTIONS.map(o=><option key={o.v} value={o.v}>{o.n}</option>)}
             </select>
           </div>
           <div className="glass p-4">
             <div style={{fontSize:11,fontWeight:600,color:'#9898ac',marginBottom:10}}>📐 测光</div>
-            <select className="select w-full text-xs" value={metering} onChange={e=>setMetering(e.target.value)}>
+            <select className="select w-full text-xs" value={metering} onChange={async e=>{if(await setProp(PTP_PROP.ExposureMeteringMode,METERING_CODES[e.target.value],'测光模式')) setMetering(e.target.value);}}>
               <option value="MATRIX">▦ 矩阵测光</option>
               <option value="CENTER_WEIGHTED">◉ 中央重点</option>
               <option value="SPOT">◎ 点测光</option>
@@ -148,15 +173,15 @@ export default function ControlScreen() {
               {['AF-S','AF-C','MF'].map(f=>(
                 <button key={f} style={{flex:1,padding:'8px 0',borderRadius:8,fontSize:11,fontWeight:600,border:'none',cursor:'pointer',
                   background:focus===f?'#3b82f6':'rgba(255,255,255,0.05)',color:focus===f?'#fff':'#9898ac',transition:'all 0.15s'}}
-                  onClick={()=>setFocus(f)}>{f}</button>
+                  onClick={async()=>{if(await setProp(PTP_PROP.FocusMode,FOCUS_MODE_CODES[f],'对焦模式')) setFocus(f);}}>{f}</button>
               ))}
             </div>
             <button className="btn btn-secondary w-full text-[11px]"
-              onClick={async ()=>{try{await camera.autoFocus();}catch{}}}>🔍 触发自动对焦</button>
+              onClick={async ()=>{try{await camera.autoFocus();setPropError('');}catch(e){setPropError(`自动对焦失败：${e.message || e}`);}}}>🔍 触发自动对焦</button>
           </div>
           <div className="glass p-4">
             <div style={{fontSize:11,fontWeight:600,color:'#9898ac',marginBottom:10}}>📸 驱动模式</div>
-            <select className="select w-full text-xs" defaultValue="S">
+            <select className="select w-full text-xs" value={drive} onChange={async e=>{if(await setProp(PTP_PROP.StillCaptureMode,DRIVE_MODE_CODES[e.target.value],'驱动模式')) setDrive(e.target.value);}}>
               <option value="S">📷 单张拍摄</option>
               <option value="CL">📸 低速连拍</option>
               <option value="CH">📸 高速连拍</option>
@@ -165,6 +190,11 @@ export default function ControlScreen() {
             </select>
           </div>
         </div>
+
+        <div className="glass p-3 text-[11px] leading-5 text-[#9898ac]">
+          Z30 设备描述：ISO、白平衡、测光、曝光补偿、驱动模式可写；快门、光圈、曝光模式、对焦模式在部分固件/模式下为只读，写入失败会显示 PTP 代码。
+        </div>
+        {propError && <div className="glass p-3 text-[11px] leading-5 text-amber-300">{propError}</div>}
       </div>
     </div>
   );

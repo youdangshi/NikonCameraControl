@@ -12,8 +12,12 @@ export default function LiveViewScreen() {
   const [captured, setCaptured] = useState(null);
   const [landscape, setLandscape] = useState(false);
   const [showInfo, setShowInfo] = useState(true);
+  const [lvError, setLvError] = useState('');
   const [snap, setSnap] = useState(null);
   const lvRef = useRef(null);
+  const lvTimerRef = useRef(null);
+  const lvRunningRef = useRef(false);
+  const lvStartingRef = useRef(false);
 
   useEffect(() => {
     const u = camera.on('captured', d => {
@@ -23,27 +27,50 @@ export default function LiveViewScreen() {
   }, []);
 
   const startLV = async () => {
-    await camera.startLiveView();
-    setLvOn(true);
-    lvRef.current = setInterval(async () => {
-      try {
-        const r = await camera.getLiveViewFrame();
-        if (r?.frame) setFrame(r.frame);
-        if (camera.isDemo?.()) setSnap(camera.demoSnapshot?.() || null);
-      } catch {}
-    }, 66);
+    if (lvRunningRef.current || lvStartingRef.current) return;
+    lvStartingRef.current = true;
+    setLvError('');
+    try {
+      await camera.startLiveView();
+      setLvOn(true);
+      lvRunningRef.current = true;
+      const loop = async () => {
+        if (!lvRunningRef.current) return;
+        try {
+          const r = await camera.getLiveViewFrame();
+          if (r?.frame) setFrame(r.frame);
+          if (r?.code) setLvError(`取景帧读取失败：PTP 0x${Number(r.code).toString(16)}`);
+          if (camera.isDemo?.()) setSnap(camera.demoSnapshot?.() || null);
+        } catch (e) {
+          setLvError(`取景中断：${e.message || e}`);
+        }
+        if (lvRunningRef.current) lvTimerRef.current = setTimeout(loop, 120);
+      };
+      loop();
+    } catch (e) {
+      lvRunningRef.current = false;
+      setLvOn(false);
+      setLvError(`启动实时取景失败：${e.message || e}`);
+    } finally {
+      lvStartingRef.current = false;
+    }
   };
 
   const stopLV = async () => {
-    if(lvRef.current){ clearInterval(lvRef.current); lvRef.current = null; }
+    lvRunningRef.current = false;
+    if (lvTimerRef.current) {
+      clearTimeout(lvTimerRef.current);
+      lvTimerRef.current = null;
+    }
     await camera.stopLiveView();
-    setLvOn(false); setFrame(null);
+    setLvOn(false); setFrame(null); setLvError('');
   };
 
   const doCapture = async () => { await camera.capture(); };
   const doAF = async () => {
     if (!connected) return;
-    try { await camera.autoFocus(); } catch {}
+    try { await camera.autoFocus(); setLvError(''); }
+    catch (e) { setLvError(`自动对焦失败：${e.message || e}`); }
   };
 
   const handleTap = async (e) => {
@@ -59,7 +86,13 @@ export default function LiveViewScreen() {
     setTimeout(()=>dot.remove(),1000);
   };
 
-  useEffect(() => () => { if(lvRef.current) clearInterval(lvRef.current); }, []);
+  useEffect(() => () => {
+    const wasRunning = lvRunningRef.current;
+    lvRunningRef.current = false;
+    lvStartingRef.current = false;
+    if (lvTimerRef.current) clearTimeout(lvTimerRef.current);
+    if (wasRunning) camera.stopLiveView().catch(() => {});
+  }, []);
 
   const connected = state.connectionState === 'session_open';
 
@@ -111,6 +144,12 @@ export default function LiveViewScreen() {
             <span className="bg-black/60 backdrop-blur px-3 py-1.5 rounded-lg text-[11px] text-white/70 font-mono">
               {snap ? `${snap.shutter} ${snap.aperture} ISO${snap.iso} EV${snap.ev >= 0 ? '+' : ''}${snap.ev}` : '1/125 F5.6 ISO400'}
             </span>
+          </div>
+        )}
+
+        {lvError && (
+          <div className="absolute top-14 left-3 right-3 z-20 rounded-lg bg-red-500/85 px-3 py-2 text-[11px] text-white shadow-lg">
+            {lvError}
           </div>
         )}
 

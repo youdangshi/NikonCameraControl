@@ -13,6 +13,7 @@ import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.util.Base64;
+import android.util.Log;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -22,6 +23,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * 手机 Type-C / OTG 原生 USB Host / PTP 插件。
@@ -45,6 +47,7 @@ import java.util.HashMap;
 @CapacitorPlugin(name = "UsbPtp")
 public class UsbPtpPlugin extends Plugin {
 
+  private static final String TAG = "NiniUsbPtp";
   private static final int NIKON_VID = 0x04B0;
   private static final String ACTION_USB_PERMISSION = "com.nikon.camera.control.USB_PERMISSION";
 
@@ -59,6 +62,7 @@ public class UsbPtpPlugin extends Plugin {
   private BroadcastReceiver permissionReceiver;
   private BroadcastReceiver deviceReceiver;
   private PendingIntent permissionIntent;
+  private final ConcurrentLinkedQueue<byte[]> readQueue = new ConcurrentLinkedQueue<>();
 
   @PluginMethod
   public void listDevices(PluginCall call) {
@@ -92,7 +96,18 @@ public class UsbPtpPlugin extends Plugin {
       return;
     }
 
+    if (connection != null && running && device != null) {
+      JSObject obj = new JSObject();
+      obj.put("connected", true);
+      obj.put("vendor", String.format("0x%04X", device.getVendorId()));
+      obj.put("product", String.format("0x%04X", device.getProductId()));
+      obj.put("device", device.getDeviceName());
+      call.resolve(obj);
+      return;
+    }
+
     startDeviceMonitoring();
+    readQueue.clear();
     UsbDevice found = null;
     for (UsbDevice d : usbManager.getDeviceList().values()) {
       if (d.getVendorId() == NIKON_VID) {
@@ -145,9 +160,10 @@ public class UsbPtpPlugin extends Plugin {
   private void requestPermission(PluginCall call) {
     Intent intent = new Intent(ACTION_USB_PERMISSION);
     intent.setPackage(getContext().getPackageName());
-    int pendingFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-        ? PendingIntent.FLAG_MUTABLE
-        : 0;
+    int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      pendingFlags |= PendingIntent.FLAG_MUTABLE;
+    }
     permissionIntent = PendingIntent.getBroadcast(getContext(), 0, intent, pendingFlags);
 
     permissionReceiver = new BroadcastReceiver() {
@@ -194,22 +210,14 @@ public class UsbPtpPlugin extends Plugin {
 
   private void openDevice(PluginCall call) {
     try {
+      cleanUp();
       connection = usbManager.openDevice(device);
       if (connection == null) {
         call.reject("无法打开 USB 设备，请重新插拔线材，并确认相机没有连接电脑/其它设备");
         return;
       }
 
-      UsbInterface chosen = null;
-      for (int i = 0; i < device.getInterfaceCount(); i++) {
-        UsbInterface u = device.getInterface(i);
-        if (u.getInterfaceClass() == UsbConstants.USB_CLASS_VENDOR_SPEC
-            || u.getInterfaceClass() == UsbConstants.USB_CLASS_STILL_IMAGE) {
-          chosen = u;
-          break;
-        }
-      }
-      if (chosen == null && device.getInterfaceCount() > 0) chosen = device.getInterface(0);
+      UsbInterface chosen = selectInterface(device, true);
       if (chosen == null) {
         cleanUp();
         call.reject("相机没有 USB 接口，请确认 USB 模式为 MTP/PTP");
@@ -234,6 +242,10 @@ public class UsbPtpPlugin extends Plugin {
         return;
       }
 
+      clearEndpointHalt(inEp);
+      clearEndpointHalt(outEp);
+      readQueue.clear();
+
       running = true;
       startReader();
       JSObject obj = new JSObject();
@@ -244,6 +256,7 @@ public class UsbPtpPlugin extends Plugin {
       call.resolve(obj);
       emitState("connected", null, null);
     } catch (Exception e) {
+      Log.e(TAG, "USB connect failed", e);
       cleanUp();
       call.reject("USB 连接失败：" + safeMessage(e));
     }
@@ -258,13 +271,9 @@ public class UsbPtpPlugin extends Plugin {
           if (n > 0) {
             byte[] chunk = new byte[n];
             System.arraycopy(buf, 0, chunk, 0, n);
-            final String b64 = Base64.encodeToString(chunk, Base64.NO_WRAP);
-            runOnUiThread(() -> {
-              JSObject data = new JSObject();
-              data.put("data", b64);
-              data.put("len", n);
-              notifyListeners("data", data);
-            });
+            readQueue.add(chunk);
+          } else if (n == 0) {
+            continue;
           } else if (n < 0) {
             break;
           }
@@ -278,6 +287,18 @@ public class UsbPtpPlugin extends Plugin {
   }
 
   @PluginMethod
+  public void read(PluginCall call) {
+    StringBuilder sb = new StringBuilder();
+    byte[] chunk;
+    while ((chunk = readQueue.poll()) != null) {
+      sb.append(Base64.encodeToString(chunk, Base64.NO_WRAP));
+    }
+    JSObject result = new JSObject();
+    result.put("data", sb.toString());
+    call.resolve(result);
+  }
+
+  @PluginMethod
   public void write(PluginCall call) {
     String data = call.getString("data");
     if (data == null || connection == null || outEp == null) {
@@ -286,12 +307,16 @@ public class UsbPtpPlugin extends Plugin {
     }
     try {
       byte[] bytes = Base64.decode(data, Base64.NO_WRAP);
-      int written = connection.bulkTransfer(outEp, bytes, bytes.length, 3000);
-      if (written < 0) {
-        call.reject("USB 写入失败，请重新插拔线材");
-      } else {
-        call.resolve(new JSObject().put("written", written));
+      int offset = 0;
+      while (offset < bytes.length) {
+        int written = connection.bulkTransfer(outEp, bytes, offset, bytes.length - offset, 3000);
+        if (written <= 0) {
+          call.reject("USB 写入失败，请重新插拔线材");
+          return;
+        }
+        offset += written;
       }
+      call.resolve(new JSObject().put("written", bytes.length));
     } catch (Exception e) {
       call.reject("USB 写入失败：" + safeMessage(e));
     }
@@ -354,8 +379,64 @@ public class UsbPtpPlugin extends Plugin {
     } catch (Exception ignored) {}
     iface = null;
     connection = null;
+    readQueue.clear();
     inEp = null;
     outEp = null;
+  }
+
+  @Override
+  protected void handleOnDestroy() {
+    stopDeviceMonitoring();
+    cleanUp();
+    super.handleOnDestroy();
+  }
+
+  private UsbInterface selectInterface(UsbDevice target, boolean requireBulkPair) {
+    UsbInterface fallback = null;
+    for (int i = 0; i < target.getInterfaceCount(); i++) {
+      UsbInterface candidate = target.getInterface(i);
+      if (candidate.getInterfaceClass() == UsbConstants.USB_CLASS_STILL_IMAGE
+          && candidate.getInterfaceSubclass() == 1
+          && candidate.getInterfaceProtocol() == 1
+          && (!requireBulkPair || hasBulkPair(candidate))) {
+        return candidate;
+      }
+      if (fallback == null
+          && candidate.getInterfaceClass() == UsbConstants.USB_CLASS_VENDOR_SPEC
+          && (!requireBulkPair || hasBulkPair(candidate))) {
+        fallback = candidate;
+      }
+      if (!requireBulkPair && fallback == null) fallback = candidate;
+    }
+    if (fallback != null) return fallback;
+    return target.getInterfaceCount() > 0 ? target.getInterface(0) : null;
+  }
+
+  private boolean hasBulkPair(UsbInterface candidate) {
+    boolean hasIn = false;
+    boolean hasOut = false;
+    for (int i = 0; i < candidate.getEndpointCount(); i++) {
+      UsbEndpoint endpoint = candidate.getEndpoint(i);
+      if (endpoint.getType() != UsbConstants.USB_ENDPOINT_XFER_BULK) continue;
+      if (endpoint.getDirection() == UsbConstants.USB_DIR_IN) hasIn = true;
+      if (endpoint.getDirection() == UsbConstants.USB_DIR_OUT) hasOut = true;
+    }
+    return hasIn && hasOut;
+  }
+
+  private void clearEndpointHalt(UsbEndpoint endpoint) {
+    if (connection == null || endpoint == null) return;
+    try {
+      connection.controlTransfer(
+          0x02, // Host -> device, endpoint recipient
+          0x01, // CLEAR_FEATURE
+          0x0000,
+          endpoint.getAddress(),
+          null,
+          0,
+          1000
+      );
+    } catch (Exception ignored) {}
   }
 
   private void runOnUiThread(Runnable action) {

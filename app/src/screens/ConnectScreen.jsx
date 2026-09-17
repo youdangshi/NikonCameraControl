@@ -25,7 +25,11 @@ export default function ConnectScreen() {
     const u3 = camera.on('diagnostic', m => {
       setLogs(prev => [...prev, m]);
     });
-    return () => { u1(); u2(); u3(); };
+    return () => {
+      [u1, u2, u3].forEach((cleanup) => {
+        try { if (typeof cleanup === 'function') cleanup(); } catch {}
+      });
+    };
   }, []);
 
   /** WiFi 连接：原生直连相机 / 桌面走后端 */

@@ -13,78 +13,106 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 自研 Capacitor TCP Socket 插件。
  *
- * 作用：让 WebView 里的 JS 能建立原生 TCP 连接，直连相机的 PTP/IP 端口（192.168.1.1:15740），
- * 这是「手机直连相机」无线遥控的唯一可行路径（浏览器无 raw socket）。
+ * PTP/IP 需要两条独立 TCP 连接：command 负责命令/响应，event 负责异步事件。
+ * channel 参数用于区分两条连接，未传时默认 command，保持兼容。
  *
- * 提供 API：
- *   - connect({ host, port })         建立连接，8 秒超时
- *   - write({ data })                发送字节（data 为 base64 字符串）
- *   - disconnect()                   关闭连接
- *   - addListener('data', cb)        收到字节（base64）事件
- *   - addListener('state', cb)       连接/断开/错误事件
+ * API：
+ *   connect({ host, port, channel })
+ *   write({ data, channel })
+ *   disconnect({ channel })        // 不传 channel 时关闭全部
+ *   addListener('data', cb)        // 事件包含 data / len / channel
+ *   addListener('state', cb)       // 事件包含 state / channel / host / port
  */
 @CapacitorPlugin(name = "TcpSocket")
 public class TcpSocketPlugin extends Plugin {
 
-  private Socket socket;
-  private InputStream input;
-  private OutputStream output;
-  private Thread readerThread;
-  private volatile boolean running = false;
+  private static final String DEFAULT_CHANNEL = "command";
+
+  private static final class Channel {
+    final String name;
+    volatile Socket socket;
+    volatile InputStream input;
+    volatile OutputStream output;
+    volatile Thread readerThread;
+    volatile boolean running;
+    volatile boolean closed;
+
+    Channel(String name) {
+      this.name = name;
+    }
+  }
+
+  private final Map<String, Channel> channels = new ConcurrentHashMap<>();
 
   @PluginMethod
   public void connect(PluginCall call) {
     String host = call.getString("host");
     Integer port = call.getInt("port");
+    String channelName = normalizeChannel(call.getString("channel"));
     if (host == null || host.trim().isEmpty() || port == null) {
       call.reject("host 和 port 必填");
       return;
     }
 
-    // 先关掉旧连接
-    closeQuietly();
+    closeChannel(channelName);
+    Channel channel = new Channel(channelName);
+    channels.put(channelName, channel);
 
-    running = true;
     new Thread(() -> {
       try {
-        Socket s = new Socket();
-        s.connect(new InetSocketAddress(host, port), 8000);
-        s.setTcpNoDelay(true);
-        socket = s;
-        input = s.getInputStream();
-        output = s.getOutputStream();
-        emitState("connected", host, port);
-        call.resolve(new JSObject().put("connected", true));
-        startReader();
+        Socket socket = new Socket();
+        socket.connect(new InetSocketAddress(host, port), 8000);
+        socket.setTcpNoDelay(true);
+        socket.setKeepAlive(true);
+
+        if (channel.closed) {
+          closeSocket(socket);
+          return;
+        }
+
+        channel.socket = socket;
+        channel.input = socket.getInputStream();
+        channel.output = socket.getOutputStream();
+        channel.running = true;
+
+        emitState(channelName, "connected", host, port);
+        call.resolve(new JSObject().put("connected", true).put("channel", channelName));
+        startReader(channel);
       } catch (IOException e) {
-        running = false;
-        emitState("error", host, port);
+        channel.running = false;
+        channels.remove(channelName, channel);
+        emitState(channelName, "error", host, port);
         call.reject(e.getMessage() != null ? e.getMessage() : "连接失败");
       }
-    }).start();
+    }, "TcpSocket-" + channelName).start();
   }
 
   @PluginMethod
   public void write(PluginCall call) {
     String data = call.getString("data");
+    String channelName = normalizeChannel(call.getString("channel"));
+    Channel channel = channels.get(channelName);
     if (data == null) {
       call.reject("data 必填（base64）");
       return;
     }
-    OutputStream out = output;
-    if (out == null) {
-      call.reject("连接未建立");
+    if (channel == null || channel.output == null) {
+      call.reject(channelName + " 通道未连接");
       return;
     }
+
     try {
       byte[] bytes = Base64.decode(data, Base64.NO_WRAP);
-      out.write(bytes);
-      out.flush();
+      synchronized (channel) {
+        channel.output.write(bytes);
+        channel.output.flush();
+      }
       call.resolve();
     } catch (IOException e) {
       call.reject("发送失败: " + e.getMessage());
@@ -93,60 +121,81 @@ public class TcpSocketPlugin extends Plugin {
 
   @PluginMethod
   public void disconnect(PluginCall call) {
-    closeQuietly();
-    emitState("disconnected", null, null);
+    String requested = call.getString("channel");
+    if (requested == null || requested.trim().isEmpty()) {
+      for (String name : channels.keySet()) closeChannel(name);
+    } else {
+      closeChannel(normalizeChannel(requested));
+    }
     call.resolve();
   }
 
-  private void startReader() {
-    readerThread = new Thread(() -> {
-      byte[] buf = new byte[8192];
+  private void startReader(Channel channel) {
+    channel.readerThread = new Thread(() -> {
+      byte[] buffer = new byte[8192];
       try {
-        while (running) {
-          int n = input.read(buf);
-          if (n < 0) break;
-          if (n == 0) continue;
-          byte[] chunk = new byte[n];
-          System.arraycopy(buf, 0, chunk, 0, n);
-          final String b64 = Base64.encodeToString(chunk, Base64.NO_WRAP);
-          getBridge().getActivity().runOnUiThread(() -> {
-            JSObject obj = new JSObject();
-            obj.put("data", b64);
-            obj.put("len", n);
-            notifyListeners("data", obj);
+        while (channel.running && channel.input != null) {
+          int count = channel.input.read(buffer);
+          if (count < 0) break;
+          if (count == 0) continue;
+
+          byte[] chunk = new byte[count];
+          System.arraycopy(buffer, 0, chunk, 0, count);
+          final String encoded = Base64.encodeToString(chunk, Base64.NO_WRAP);
+          runOnUiThread(() -> {
+            JSObject event = new JSObject();
+            event.put("data", encoded);
+            event.put("len", chunk.length);
+            event.put("channel", channel.name);
+            notifyListeners("data", event);
           });
         }
       } catch (IOException ignored) {
-        // 连接被关闭或出错
+        // Socket closed locally or by the camera.
       } finally {
-        running = false;
+        channel.running = false;
+        if (!channel.closed) emitState(channel.name, "disconnected", null, null);
       }
-    });
-    readerThread.setDaemon(true);
-    readerThread.start();
+    }, "TcpReader-" + channel.name);
+    channel.readerThread.setDaemon(true);
+    channel.readerThread.start();
   }
 
-  private void emitState(String state, String host, Integer port) {
-    JSObject obj = new JSObject();
-    obj.put("state", state);
-    if (host != null) obj.put("host", host);
-    if (port != null) obj.put("port", port);
-    notifyListeners("state", obj);
+  private void closeChannel(String name) {
+    Channel channel = channels.remove(name);
+    if (channel == null) return;
+    channel.closed = true;
+    channel.running = false;
+    closeSocket(channel.socket);
+    channel.input = null;
+    channel.output = null;
+    channel.socket = null;
+    emitState(name, "disconnected", null, null);
   }
 
-  private void closeQuietly() {
-    running = false;
-    try {
-      if (input != null) input.close();
-    } catch (IOException ignored) {}
-    try {
-      if (output != null) output.close();
-    } catch (IOException ignored) {}
-    try {
-      if (socket != null) socket.close();
-    } catch (IOException ignored) {}
-    input = null;
-    output = null;
-    socket = null;
+  private void closeSocket(Socket socket) {
+    if (socket == null) return;
+    try { socket.close(); } catch (IOException ignored) {}
+  }
+
+  private void emitState(String channelName, String state, String host, Integer port) {
+    JSObject event = new JSObject();
+    event.put("state", state);
+    event.put("channel", channelName);
+    if (host != null) event.put("host", host);
+    if (port != null) event.put("port", port);
+    runOnUiThread(() -> notifyListeners("state", event));
+  }
+
+  private void runOnUiThread(Runnable action) {
+    if (getActivity() != null) {
+      getActivity().runOnUiThread(action);
+    } else {
+      action.run();
+    }
+  }
+
+  private static String normalizeChannel(String value) {
+    return value == null || value.trim().isEmpty() ? DEFAULT_CHANNEL : value.trim();
   }
 }

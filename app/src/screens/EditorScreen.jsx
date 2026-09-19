@@ -5,12 +5,13 @@ import {
   DEFAULT_ADJ, DEFAULT_PORTRAIT,
 } from '../editor/presets.js';
 import { renderPreview, exportEdited, loadImage } from '../editor/imageEngine.js';
+import { ArrowLeft, BookOpen, Check, Download, ImageOff, RotateCcw, SlidersHorizontal, Sparkles, UserRound } from 'lucide-react';
 
 const TABS = [
-  { id: 'basic', label: '基础调色', icon: '🎛' },
-  { id: 'presets', label: '风格预设', icon: '✨' },
-  { id: 'portrait', label: '人像精修', icon: '👤' },
-  { id: 'guide', label: '修图指南', icon: '📖' },
+  { id: 'portrait', label: '一键人像', Icon: UserRound },
+  { id: 'basic', label: '基础调色', Icon: SlidersHorizontal },
+  { id: 'presets', label: '风格预设', Icon: Sparkles },
+  { id: 'guide', label: '修图指南', Icon: BookOpen },
 ];
 
 const BASIC_ITEMS = [
@@ -51,7 +52,8 @@ export default function EditorScreen() {
   const stateName = location.state?.name || '未命名照片';
   const [source, setSource] = useState(stateSrc || '');
   const [name, setName] = useState(stateName);
-  const [tab, setTab] = useState('basic');
+  const [tab, setTab] = useState('portrait');
+  const [quickStrength, setQuickStrength] = useState(70);
   const [adj, setAdj] = useState({ ...DEFAULT_ADJ });
   const [portrait, setPortrait] = useState({ ...DEFAULT_PORTRAIT });
   const [preview, setPreview] = useState('');
@@ -164,27 +166,36 @@ export default function EditorScreen() {
     return groups;
   }, []);
 
+  const quickLooks = useMemo(() => STYLE_PRESETS.filter(preset => preset.category === '人像'), []);
+
+  const applyQuickLook = (preset) => {
+    const scale = quickStrength / 100;
+    const scaled = Object.fromEntries(Object.entries(preset.params || {}).map(([key, value]) => [key, Math.round(Number(value) * scale)]));
+    setAdj({ ...DEFAULT_ADJ, ...scaled });
+    setMsg(`已应用「${preset.name}」· ${quickStrength}%`);
+  };
+
   return (
-    <div className="h-full flex flex-col bg-black overflow-hidden">
+    <div className="h-full flex flex-col bg-[var(--app-bg)] overflow-hidden">
       {/* 顶部栏 */}
-      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0d0d17]">
-        <button className="btn-icon text-sm" onClick={() => navigate(-1)} title="返回">←</button>
+      <div className="flex-shrink-0 h-[54px] flex items-center gap-2 px-3 border-b border-[var(--line)] bg-[#0d1012]">
+        <button className="btn-icon" onClick={() => navigate(-1)} title="返回"><ArrowLeft size={18} /></button>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold truncate">修图工作台</p>
-          <p className="text-[10px] text-[#585870] truncate">{name}</p>
+          <p className="text-sm font-semibold truncate">修图工作台</p>
+          <p className="text-[10px] text-[var(--text-muted)] truncate">{name}</p>
         </div>
-        <button className="btn btn-ghost text-xs" onClick={reset}>重置</button>
+        <button className="btn btn-ghost text-xs" onClick={reset}><RotateCcw size={14} /> 重置</button>
         <button className="btn btn-primary text-xs" onClick={doExport} disabled={!source || exporting}>
-          {exporting ? '导出中…' : '导出'}
+          {exporting ? <Check size={14} /> : <Download size={14} />}{exporting ? '导出中' : '导出'}
         </button>
       </div>
 
       {/* 预览区 */}
-      <div className="relative flex-1 min-h-0 bg-[#05050a] overflow-hidden">
+      <div className="relative flex-1 min-h-0 bg-black overflow-hidden">
         {!source ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-center">
-            <span className="text-6xl mb-4 opacity-25">🖼</span>
-            <p className="text-sm text-[#9898ac]">请选择一张照片开始修图</p>
+            <ImageOff size={42} className="text-[var(--text-muted)] mb-4" strokeWidth={1.3} />
+            <p className="text-sm text-[var(--text-soft)]">请选择一张照片开始修图</p>
             <button className="btn btn-primary mt-5" onClick={() => fileRef.current?.click()}>选择照片</button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickFile} />
           </div>
@@ -201,23 +212,23 @@ export default function EditorScreen() {
               className="max-w-full max-h-full object-contain"
               style={{ opacity: rendering ? 0.55 : 1, transition: 'opacity .15s' }}
             />
-            {compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/60 text-[10px]">原图</span>}
-            {!compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/60 text-[10px]">效果预览</span>}
-            {rendering && <span className="absolute bottom-3 right-3 text-[10px] text-[#60a5fa]">处理中…</span>}
+            {compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/70 border border-white/10 text-[10px]">原图</span>}
+            {!compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/70 border border-white/10 text-[10px]">效果预览</span>}
+            {rendering && <span className="absolute bottom-3 right-3 mono text-[10px] text-[var(--accent)]">处理中</span>}
           </div>
         )}
       </div>
 
       {/* 底部工具区 */}
-      <div className="flex-shrink-0 h-[46%] min-h-[270px] flex flex-col bg-[#0d0d17] border-t border-white/5">
-        <div className="flex gap-2 px-3 pt-2 overflow-x-auto">
+      <div className="flex-shrink-0 h-[46%] min-h-[270px] flex flex-col bg-[#0d1012] border-t border-[var(--line)]">
+        <div className="flex gap-2 px-3 pt-2 pb-2 overflow-x-auto border-b border-[var(--line)]">
           {TABS.map(t => (
             <button
               key={t.id}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${tab === t.id ? 'bg-blue-600 text-white' : 'bg-white/5 text-[#9898ac]'}`}
+              className={`grid-chip flex items-center gap-1.5 ${tab === t.id ? 'active' : ''}`}
               onClick={() => setTab(t.id)}
             >
-              {t.icon} {t.label}
+              <t.Icon size={13} /> {t.label}
             </button>
           ))}
         </div>
@@ -235,10 +246,10 @@ export default function EditorScreen() {
             <div className="space-y-4">
               {Object.entries(categoryGroups).map(([category, presets]) => (
                 <div key={category}>
-                  <p className="text-[11px] font-semibold text-[#9898ac] mb-2">共 {presets.length} 个 · {category}</p>
+                  <p className="text-[11px] font-semibold text-[var(--text-muted)] mb-2">共 {presets.length} 个 · {category}</p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {presets.map(p => (
-                      <button key={p.id} className="glass-sm p-3 text-left hover:border-blue-500/50 transition-all" onClick={() => applyPreset(p)}>
+                      <button key={p.id} className="panel p-3 text-left hover:border-[var(--line-strong)] transition-colors" onClick={() => applyPreset(p)}>
                         <p className="text-xs font-bold">{p.name}</p>
                         <p className="text-[10px] text-[#585870] mt-1 leading-4">{p.desc.slice(0, 52)}{p.desc.length > 52 ? '…' : ''}</p>
                       </button>
@@ -251,6 +262,30 @@ export default function EditorScreen() {
 
           {tab === 'portrait' && (
             <div>
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-xs font-semibold">一键人像</p>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">选择风格后仍可继续细调</p>
+                  </div>
+                  <span className="mono text-[10px] text-[var(--accent)]">{quickStrength}%</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {quickLooks.map(preset => (
+                    <button key={preset.id} className="panel p-3 text-left hover:border-[var(--line-strong)]" onClick={() => applyQuickLook(preset)}>
+                      <div className="h-10 rounded-md bg-[#0b0d0f] border border-[var(--line)] flex items-center justify-center mb-2">
+                        <UserRound size={17} className="text-[var(--text-soft)]" />
+                      </div>
+                      <p className="text-[11px] font-semibold truncate">{preset.name.replace('人像·', '')}</p>
+                      <p className="text-[9px] text-[var(--text-muted)] mt-1 line-clamp-2 leading-3">{preset.desc.slice(0, 34)}</p>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 panel px-3 py-2.5">
+                  <div className="flex justify-between text-[10px] text-[var(--text-muted)] mb-1"><span>整体强度</span><span className="mono">{quickStrength}%</span></div>
+                  <input type="range" min="20" max="100" step="5" value={quickStrength} onChange={e => setQuickStrength(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
+                </div>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
                 {PORTRAIT_ITEMS.map(([k, label]) => (
                   <Slider key={k} label={label} value={portrait[k]} min={0} max={100} onChange={v => setPortraitField(k, v)} accent="#f472b6" />
@@ -260,7 +295,7 @@ export default function EditorScreen() {
                 <p className="text-[11px] font-semibold text-[#9898ac] mb-2">推荐修图顺序（点击应用该步骤）</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {PORTRAIT_STEPS.map(step => (
-                    <button key={step.key} className="glass-sm p-2 text-left" onClick={() => applyStep(step)}>
+                    <button key={step.key} className="panel p-2 text-left" onClick={() => applyStep(step)}>
                       <p className="text-[11px] font-bold">{step.name}</p>
                       <p className="text-[9px] text-[#585870] mt-0.5 leading-3">{step.desc.slice(0, 44)}{step.desc.length > 44 ? '…' : ''}</p>
                     </button>
@@ -276,7 +311,7 @@ export default function EditorScreen() {
                 修图顺序：先校白平衡与曝光，再调明暗层次和色彩，最后做细节 / 人像精修。不同题材侧重不同，以下为整理后的修图知识库。
               </p>
               {GENRE_GUIDE.map(g => (
-                <div key={g.genre} className="glass-sm p-3">
+                <div key={g.genre} className="panel p-3">
                   <p className="text-xs font-bold">{g.icon} {g.genre}</p>
                   <p className="text-[10px] text-[#60a5fa] mt-1">流程：{g.order.join(' → ')}</p>
                   <ul className="mt-2 space-y-1">
@@ -289,7 +324,7 @@ export default function EditorScreen() {
         </div>
       </div>
 
-      {msg && <div className="absolute bottom-24 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-blue-600/90 text-[11px] text-white z-20 anim-fade">{msg}</div>}
+      {msg && <div className="absolute bottom-24 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-md bg-[var(--accent)] text-[11px] text-[var(--accent-ink)] z-20 anim-fade">{msg}</div>}
       <input ref={fileInput} type="file" className="hidden" onChange={pickFile} />
     </div>
   );

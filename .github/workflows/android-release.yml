@@ -12,6 +12,7 @@ jobs:
   android-apk:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -35,18 +36,15 @@ jobs:
           ls "$SDK_ROOT/platforms"
           ls "$SDK_ROOT/build-tools"
 
-      - name: Apply Nini 1.0.6 source patch
-        run: |
-          cat release/v1.0.6.patch.gz.b64.part* > /tmp/v1.0.6.patch.gz.b64
-          base64 -d /tmp/v1.0.6.patch.gz.b64 | gzip -d > /tmp/v1.0.6.patch
-          echo "538caeca1bc264327c088687339fd235c4421e501f314e8c600e831e357e98bf  /tmp/v1.0.6.patch" | sha256sum -c -
-          git apply --index /tmp/v1.0.6.patch
-
-      - name: Build web assets
+      - name: Install dependencies and run protocol smoke test
         working-directory: app
         run: |
           npm ci --no-audit --no-fund
           npm run test:protocol
+
+      - name: Build web assets and sync Capacitor
+        working-directory: app
+        run: |
           npx vite build
           npx cap sync android
 
@@ -54,28 +52,25 @@ jobs:
         working-directory: app/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Prepare release asset
         run: |
-          cp app/android/app/build/outputs/apk/debug/app-debug.apk Nini-1.0.6-debug.apk
-          sha256sum Nini-1.0.6-debug.apk
-
-      - name: Commit applied source
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: apply Nini 1.0.6 source patch [skip ci]"
-          git push origin HEAD:main
+          VERSION=$(node -p "require('./app/package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          cp app/android/app/build/outputs/apk/debug/app-debug.apk "Nini-${VERSION}-debug.apk"
+          sha256sum "Nini-${VERSION}-debug.apk"
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v1.0.6
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || \
+          TAG="v${VERSION}"
+          NOTES="docs/RELEASE_NOTES_${TAG}.md"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
-              --title "妮妮 v1.0.6" \
-              --notes-file docs/RELEASE_NOTES_v1.0.6.md \
-              --target "$GITHUB_SHA"
-          gh release upload "$TAG" Nini-1.0.6-debug.apk --clobber
+              --title "妮妮 ${TAG}" \
+              --target "$GITHUB_SHA" \
+              --notes-file "$NOTES"
+          fi
+          gh release upload "$TAG" "Nini-${VERSION}-debug.apk" --clobber

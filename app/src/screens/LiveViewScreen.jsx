@@ -6,8 +6,7 @@ import PoseLibrary from '../components/PoseLibrary.jsx';
 import CameraControlPanel from '../components/CameraControlPanel.jsx';
 import CompositionGuides, { COMPOSITION_MODES } from '../components/CompositionGuides.jsx';
 import {
-  ArrowLeft, Aperture, Camera, Crosshair, Focus, Grid3X3, Maximize2, Minimize2,
-  SlidersHorizontal, UserRound, Wifi,
+  ArrowLeft, Aperture, Camera, Grid3X3, RotateCcw, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 
 const INITIAL_QUICK = {
@@ -40,7 +39,7 @@ export default function LiveViewScreen() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [posePanelOpen, setPosePanelOpen] = useState(false);
   const [guidePanelOpen, setGuidePanelOpen] = useState(false);
-  const [previewFit, setPreviewFit] = useState('contain');
+  const [landscape, setLandscape] = useState(true);
   const [quick, setQuick] = useState(INITIAL_QUICK);
   const [guide, setGuide] = useState(initialGuide);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
@@ -228,24 +227,31 @@ export default function LiveViewScreen() {
   };
 
   const guideLabel = COMPOSITION_MODES.find(item => item.id === guide.mode)?.label || '构图线';
+  const toggleOrientation = async () => {
+    const next = !landscape;
+    setLandscape(next);
+    await camera.setLandscape(next).catch(() => {});
+    const updateViewport = () => {
+      const node = lvRef.current;
+      if (node) setViewport({ width: node.clientWidth, height: node.clientHeight });
+    };
+    setTimeout(updateViewport, 120);
+    setTimeout(updateViewport, 420);
+  };
   let guideRect = null;
   if (frame && viewport.width > 0 && viewport.height > 0 && imageSize.width > 0 && imageSize.height > 0) {
-    if (previewFit === 'cover') {
-      guideRect = { left: 0, top: 0, width: viewport.width, height: viewport.height };
+    const imageAspect = imageSize.width / imageSize.height;
+    const viewAspect = viewport.width / viewport.height;
+    let width;
+    let height;
+    if (imageAspect > viewAspect) {
+      width = viewport.width;
+      height = width / imageAspect;
     } else {
-      const imageAspect = imageSize.width / imageSize.height;
-      const viewAspect = viewport.width / viewport.height;
-      let width;
-      let height;
-      if (imageAspect > viewAspect) {
-        width = viewport.width;
-        height = width / imageAspect;
-      } else {
-        height = viewport.height;
-        width = height * imageAspect;
-      }
-      guideRect = { left: (viewport.width - width) / 2, top: (viewport.height - height) / 2, width, height };
+      height = viewport.height;
+      width = height * imageAspect;
     }
+    guideRect = { left: (viewport.width - width) / 2, top: (viewport.height - height) / 2, width, height };
   }
 
   return (
@@ -255,7 +261,7 @@ export default function LiveViewScreen() {
           <img
             src={frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}`}
             className="absolute inset-0 w-full h-full"
-            style={{ objectFit: previewFit }}
+            style={{ objectFit: 'contain' }}
             onLoad={event => setImageSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })}
             alt="实时取景"
           />
@@ -432,10 +438,11 @@ export default function LiveViewScreen() {
             </button>
             <button
               className="w-11 h-11 rounded-full bg-white/8 border border-white/12 text-white/75 flex items-center justify-center"
-              onClick={() => setPreviewFit(value => value === 'contain' ? 'cover' : 'contain')}
-              aria-label="画面比例"
+              onClick={toggleOrientation}
+              aria-label={landscape ? '切换竖屏' : '切换横屏'}
+              title={landscape ? '切换竖屏' : '切换横屏'}
             >
-              {previewFit === 'contain' ? <Maximize2 size={17} /> : <Minimize2 size={17} />}
+              <RotateCcw size={17} className={landscape ? '' : 'rotate-90'} />
             </button>
           </div>
         </div>

@@ -8,9 +8,9 @@ import { renderPreview, exportEdited, loadImage } from '../editor/imageEngine.js
 import { ArrowLeft, BookOpen, Check, Download, ImageOff, RotateCcw, SlidersHorizontal, Sparkles, UserRound } from 'lucide-react';
 
 const TABS = [
+  { id: 'portrait', label: '一键人像', Icon: UserRound },
   { id: 'basic', label: '基础调色', Icon: SlidersHorizontal },
   { id: 'presets', label: '风格预设', Icon: Sparkles },
-  { id: 'portrait', label: '人像精修', Icon: UserRound },
   { id: 'guide', label: '修图指南', Icon: BookOpen },
 ];
 
@@ -52,7 +52,8 @@ export default function EditorScreen() {
   const stateName = location.state?.name || '未命名照片';
   const [source, setSource] = useState(stateSrc || '');
   const [name, setName] = useState(stateName);
-  const [tab, setTab] = useState('basic');
+  const [tab, setTab] = useState('portrait');
+  const [quickStrength, setQuickStrength] = useState(70);
   const [adj, setAdj] = useState({ ...DEFAULT_ADJ });
   const [portrait, setPortrait] = useState({ ...DEFAULT_PORTRAIT });
   const [preview, setPreview] = useState('');
@@ -165,6 +166,15 @@ export default function EditorScreen() {
     return groups;
   }, []);
 
+  const quickLooks = useMemo(() => STYLE_PRESETS.filter(preset => preset.category === '人像'), []);
+
+  const applyQuickLook = (preset) => {
+    const scale = quickStrength / 100;
+    const scaled = Object.fromEntries(Object.entries(preset.params || {}).map(([key, value]) => [key, Math.round(Number(value) * scale)]));
+    setAdj({ ...DEFAULT_ADJ, ...scaled });
+    setMsg(`已应用「${preset.name}」· ${quickStrength}%`);
+  };
+
   return (
     <div className="h-full flex flex-col bg-[var(--app-bg)] overflow-hidden">
       {/* 顶部栏 */}
@@ -252,6 +262,30 @@ export default function EditorScreen() {
 
           {tab === 'portrait' && (
             <div>
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-xs font-semibold">一键人像</p>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">选择风格后仍可继续细调</p>
+                  </div>
+                  <span className="mono text-[10px] text-[var(--accent)]">{quickStrength}%</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {quickLooks.map(preset => (
+                    <button key={preset.id} className="panel p-3 text-left hover:border-[var(--line-strong)]" onClick={() => applyQuickLook(preset)}>
+                      <div className="h-10 rounded-md bg-[#0b0d0f] border border-[var(--line)] flex items-center justify-center mb-2">
+                        <UserRound size={17} className="text-[var(--text-soft)]" />
+                      </div>
+                      <p className="text-[11px] font-semibold truncate">{preset.name.replace('人像·', '')}</p>
+                      <p className="text-[9px] text-[var(--text-muted)] mt-1 line-clamp-2 leading-3">{preset.desc.slice(0, 34)}</p>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 panel px-3 py-2.5">
+                  <div className="flex justify-between text-[10px] text-[var(--text-muted)] mb-1"><span>整体强度</span><span className="mono">{quickStrength}%</span></div>
+                  <input type="range" min="20" max="100" step="5" value={quickStrength} onChange={e => setQuickStrength(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
+                </div>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
                 {PORTRAIT_ITEMS.map(([k, label]) => (
                   <Slider key={k} label={label} value={portrait[k]} min={0} max={100} onChange={v => setPortraitField(k, v)} accent="#f472b6" />

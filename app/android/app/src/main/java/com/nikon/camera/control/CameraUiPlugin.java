@@ -1,6 +1,7 @@
 package com.nikon.camera.control;
 
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.view.Window;
 
@@ -20,6 +21,27 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  */
 @CapacitorPlugin(name = "CameraUi")
 public class CameraUiPlugin extends Plugin {
+
+  @PluginMethod
+  public void setLandscape(PluginCall call) {
+    Activity activity = getActivity();
+    if (activity == null) {
+      call.reject("Activity is not available");
+      return;
+    }
+
+    boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled", false));
+    activity.runOnUiThread(() -> {
+      activity.setRequestedOrientation(
+          enabled
+              ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+              : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+      );
+      JSObject result = new JSObject();
+      result.put("enabled", enabled);
+      call.resolve(result);
+    });
+  }
 
   @PluginMethod
   public void setFullscreen(PluginCall call) {

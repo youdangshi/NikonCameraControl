@@ -64,8 +64,15 @@ export default function LiveViewScreen() {
   }, []);
 
   useEffect(() => {
-    camera.setFullscreen(true);
-    return () => { camera.setFullscreen(false); };
+    camera.setLandscape(true).catch(() => {});
+    const fullscreenTimer = setTimeout(() => {
+      camera.setFullscreen(true).catch(() => {});
+    }, 120);
+    return () => {
+      clearTimeout(fullscreenTimer);
+      camera.setFullscreen(false).catch(() => {});
+      camera.setLandscape(false).catch(() => {});
+    };
   }, []);
 
   useEffect(() => {

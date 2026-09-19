@@ -301,6 +301,23 @@ export const camera = {
     }
   },
 
+  /** Android 原生活动方向。实时取景锁定横屏，退出时恢复竖屏。 */
+  async setLandscape(enabled) {
+    const next = Boolean(enabled);
+    if (!isNativeMobile()) {
+      try {
+        if (next && screen.orientation?.lock) await screen.orientation.lock('landscape');
+        else if (!next && screen.orientation?.unlock) screen.orientation.unlock();
+      } catch {}
+      return { enabled: next, web: true };
+    }
+    try {
+      return await CameraUi.setLandscape({ enabled: next });
+    } catch (e) {
+      return { enabled: next, error: e.message || String(e) };
+    }
+  },
+
   /** 是否跑在原生 App（手机）里 */
   isNative: () => isNativeMobile(),
 

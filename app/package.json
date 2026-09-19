@@ -1,6 +1,6 @@
 {
   "name": "nini",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "妮妮 - Nikon Z30 WiFi/USB 相机控制与本地修图",
   "type": "module",
   "license": "MIT",
@@ -18,6 +18,7 @@
     "@capacitor/android": "^8.5.0",
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",

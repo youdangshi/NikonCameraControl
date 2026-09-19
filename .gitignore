@@ -68,6 +68,7 @@ app/android/app/src/androidTest/
 # ── 参考 APK 反解临时目录（严禁上传） ──────────────────────
 .apk_ref/
 .apk_ref_*/
+reference-extract/
 app-release.apk*
 *.apk.1
 
@@ -78,3 +79,8 @@ app-release.apk*
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# ── 本机真机调试截图与 UI 层级（禁止上传） ──────────────────
+nini-*.png
+nini-*.xml
+lv1.png

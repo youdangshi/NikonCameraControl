@@ -23,6 +23,22 @@ export const EXPOSURE_PROGRAM_CODES = Object.freeze({
   P: 2,
   A: 3,
   S: 4,
+  AUTO: 32784,
+  U1: 32848,
+  U2: 32849,
+  U3: 32850,
+});
+
+export const EXPOSURE_PROGRAM_LABELS = Object.freeze({
+  1: 'M',
+  2: 'P',
+  3: 'A',
+  4: 'S',
+  5: 'P',
+  32784: 'AUTO',
+  32848: 'U1',
+  32849: 'U2',
+  32850: 'U3',
 });
 
 export const WHITE_BALANCE_CODES = Object.freeze({
@@ -129,4 +145,32 @@ export function apertureLabelToHundredths(label) {
 
 export function exposureCompensationToMilliEv(stops) {
   return Math.round(Number(stops) * 1000);
+}
+
+export function exposureProgramLabel(value) {
+  return EXPOSURE_PROGRAM_LABELS[Number(value)] || `0x${Number(value).toString(16).toUpperCase()}`;
+}
+
+export function exposureTimeMicrosToLabel(value) {
+  const micros = Number(value) >>> 0;
+  if (micros === 0xFFFFFFFF) return 'Bulb';
+  if (micros <= 0) return '--';
+  if (micros >= 1_000_000) {
+    const seconds = micros / 1_000_000;
+    return `${Number.isInteger(seconds) ? seconds.toFixed(0) : seconds.toFixed(1)}"`;
+  }
+  const denominator = 1_000_000 / micros;
+  return `1/${denominator >= 10 ? Math.round(denominator) : denominator.toFixed(1).replace(/\.0$/, '')}`;
+}
+
+export function fNumberLabel(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return '--';
+  const f = number / 100;
+  return `F${Number.isInteger(f) ? f.toFixed(0) : f.toFixed(1)}`;
+}
+
+export function reverseEnumCode(table, key) {
+  const value = table?.[key];
+  return typeof value === 'number' ? value : null;
 }

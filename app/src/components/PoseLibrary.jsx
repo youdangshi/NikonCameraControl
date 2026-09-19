@@ -1,4 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import {
+  Accessibility, Armchair, ArrowLeftRight, CircleUserRound, DoorOpen, Eye,
+  Footprints, Grid3X3, Hand, PersonStanding, ScanLine, UserRound,
+} from 'lucide-react';
 
 /**
  * 人像拍照姿势悬浮窗
@@ -16,18 +20,18 @@ import React, { useEffect, useRef, useState } from 'react';
  */
 
 export const POSE_ITEMS = [
-  { id: 'standing', label: '站姿', icon: '🧍' },
-  { id: 'sitting', label: '坐姿', icon: '🪑' },
-  { id: 'lean', label: '靠墙', icon: '🚪' },
-  { id: 'lookback', label: '回头', icon: '👀' },
-  { id: 'walking', label: '走路', icon: '🚶' },
-  { id: 'squatting', label: '蹲姿', icon: '🧎' },
-  { id: 'peace', label: '比耶', icon: '✌️' },
-  { id: 'side', label: '侧身', icon: '↔️' },
-  { id: 'half', label: '半身', icon: '🟰' },
-  { id: 'full', label: '全身', icon: '🫂' },
-  { id: 'headshot', label: '头部', icon: '🗣' },
-  { id: 'thirds', label: '三分', icon: '⊞' },
+  { id: 'standing', label: '站姿', Icon: PersonStanding },
+  { id: 'sitting', label: '坐姿', Icon: Armchair },
+  { id: 'lean', label: '靠墙', Icon: DoorOpen },
+  { id: 'lookback', label: '回头', Icon: Eye },
+  { id: 'walking', label: '走路', Icon: Footprints },
+  { id: 'squatting', label: '蹲姿', Icon: Accessibility },
+  { id: 'peace', label: '比耶', Icon: Hand },
+  { id: 'side', label: '侧身', Icon: ArrowLeftRight },
+  { id: 'half', label: '半身', Icon: UserRound },
+  { id: 'full', label: '全身', Icon: ScanLine },
+  { id: 'headshot', label: '头部', Icon: CircleUserRound },
+  { id: 'thirds', label: '三分', Icon: Grid3X3 },
 ];
 
 function PoseSvgInternal({ pose, opacity, color }) {
@@ -169,13 +173,18 @@ export default function PoseLibrary({
   opacity = 0.55,
   color = '#ffffff',
   scale = 1,
+  showTrigger = true,
+  panelOpen: controlledPanelOpen,
+  onPanelOpenChange,
   onSelect,
   onOpacityChange,
   onColorChange,
   onScaleChange,
   onToggle,
 }) {
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [internalPanelOpen, setInternalPanelOpen] = useState(false);
+  const panelOpen = controlledPanelOpen ?? internalPanelOpen;
+  const setPanelOpen = onPanelOpenChange || setInternalPanelOpen;
   const [pos, setPos] = useState({ x: 50, y: 50 });
   const drag = useRef(null);
 
@@ -218,32 +227,37 @@ export default function PoseLibrary({
       )}
 
       {/* 打开姿势库按钮 */}
-      <button
-        className="absolute top-2 left-2 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 border border-white/10 text-[11px] text-white/80 backdrop-blur"
-        onClick={() => panelOpen ? setPanelOpen(false) : setPanelOpen(true)}
-        title="人像姿势"
-      >
-        {panelOpen ? '✕ 收起' : '📐 姿势'}
-      </button>
+      {showTrigger && (
+        <button
+          className="absolute top-3 left-3 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 border border-white/10 text-[11px] text-white/80 backdrop-blur"
+          onClick={() => setPanelOpen(!panelOpen)}
+          title="人像姿势"
+        >
+          {panelOpen ? '✕ 收起' : '📐 姿势'}
+        </button>
+      )}
 
       {/* 姿势库面板 */}
       {panelOpen && (
-        <div className="absolute left-2 top-11 z-30 w-[min(330px,88%)] max-h-[72%] overflow-y-auto rounded-2xl bg-[#14141f]/95 border border-white/10 shadow-2xl p-3 anim-scale">
+        <div className="absolute left-3 top-14 z-30 w-[min(340px,90%)] max-h-[72%] overflow-y-auto rounded-md bg-[#111417]/98 border border-white/12 shadow-2xl p-3 anim-scale">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-bold">人像姿势库</p>
+            <p className="text-xs font-semibold">人像姿势参考</p>
             <button className="btn-icon w-7 h-7 text-xs" onClick={() => setPanelOpen(false)}>✕</button>
           </div>
           <div className="grid grid-cols-4 gap-1.5">
-            {POSE_ITEMS.map(p => (
+            {POSE_ITEMS.map(p => {
+              const Icon = p.Icon;
+              return (
               <button
                 key={p.id}
-                className={`rounded-lg p-1.5 text-center text-[10px] transition-colors ${pose === p.id ? 'bg-blue-600 text-white' : 'bg-white/5 text-[#9898ac] hover:bg-white/10'}`}
+                className={`rounded-md p-2 text-center text-[9px] transition-colors ${pose === p.id ? 'bg-[var(--accent)] text-[var(--accent-ink)]' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
                 onClick={() => onSelect && onSelect(p.id)}
               >
-                <div className="text-lg">{p.icon}</div>
+                <Icon size={17} className="mx-auto" />
                 <div className="mt-0.5">{p.label}</div>
               </button>
-            ))}
+              );
+            })}
           </div>
           <div className="mt-3 border-t border-white/5 pt-3">
             <div className="flex justify-between mb-1">

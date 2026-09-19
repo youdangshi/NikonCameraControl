@@ -166,31 +166,41 @@ export function createTransport() {
  * 原生 USB PTP 传输（手机 Type-C / OTG）
  */
 function createUsbTransport() {
-  let dataCb = null;
-  let timer = null;
   return {
-    async connect() { await UsbPtp.connect(); },
-    async write(bytes) { await UsbPtp.write({ data: bytesToB64(bytes) }); },
-    close() {
-      if (timer) clearInterval(timer);
-      timer = null;
-      UsbPtp.disconnect();
-    },
-    onData(cb) {
-      dataCb = cb;
-      timer = setInterval(async () => {
+    async connect() {
+      try {
+        return await UsbPtp.connect();
+      } catch (first) {
+        // 相机侧可能残留上一次主机留下的 PTP 会话，释放接口重新占用后再试一次。
         try {
-          const r = await UsbPtp.read();
-          if (r && r.data && r.data.length) {
-            if (dataCb) dataCb(b64ToBytes(r.data));
-          }
-        } catch {}
-      }, 20);
-      return () => {
-        if (timer) clearInterval(timer);
-        timer = null;
+          await UsbPtp.resetUsb();
+          return { connected: true, viaReset: true };
+        } catch (second) {
+          throw first;
+        }
+      }
+    },
+    async reset() { await UsbPtp.resetUsb(); },
+    async drain(idleMs) {
+      const r = await UsbPtp.drainInput({ idleMs: idleMs || 250 });
+      return r && typeof r.drained === 'number' ? r.drained : 0;
+    },
+    async request(bytes, timeoutMs, dataOut, transactionId) {
+      const result = await UsbPtp.request({
+        data: bytesToB64(bytes),
+        dataOut: dataOut && dataOut.length ? bytesToB64(dataOut) : undefined,
+        timeoutMs: timeoutMs || 8000,
+        transactionId: transactionId || 0,
+      });
+      return {
+        bytes: b64ToBytes(result.data || ''),
+        complete: !!result.complete,
       };
     },
+    close() {
+      UsbPtp.disconnect();
+    },
+    onData() { return () => {}; },
     onState(cb) { return () => {}; },
   };
 }
@@ -223,6 +233,30 @@ function concatBytes(chunks) {
   let offset = 0;
   chunks.forEach((chunk) => { out.set(chunk, offset); offset += chunk.length; });
   return out;
+}
+
+function parseUsbContainers(bytes) {
+  const containers = [];
+  let offset = 0;
+  while (offset + 12 <= bytes.length) {
+    const length = readU32LE(bytes, offset);
+    const type = readU16LE(bytes, offset + 4);
+    // 相机 IN 端点里偶尔会残留填充/陈旧字节，逐字节重新对齐，别直接判失败。
+    if (length < 12 || type < 1 || type > 4) {
+      offset += 1;
+      continue;
+    }
+    if (offset + length > bytes.length) break; // 尾部不完整，等下一批数据
+    containers.push({
+      length,
+      type,
+      code: readU16LE(bytes, offset + 6),
+      transactionId: readU32LE(bytes, offset + 8),
+      payload: bytes.subarray(offset + 12, offset + length),
+    });
+    offset += length;
+  }
+  return containers;
 }
 
 export class PtpIpSession {
@@ -556,6 +590,45 @@ export class PtpUsbSession {
   async _command(opCode, params = [], timeoutMs = 8000, dataOut = null) {
     const cmd = this.buildUsbCmd(opCode, params);
     this._diag(`USB 命令 0x${opCode.toString(16).padStart(4, '0')} tx=${this.transactionId}`);
+
+    if (typeof this.transport.request === 'function') {
+      const dataContainer = dataOut && dataOut.length
+        ? this.buildUsbContainer(2, opCode, this.transactionId, dataOut)
+        : null;
+      const exchange = await this.transport.request(cmd, timeoutMs, dataContainer, this.transactionId);
+      const containers = parseUsbContainers(exchange.bytes || new Uint8Array(0));
+      let data = null;
+      let response = null;
+
+      for (const container of containers) {
+        if (container.type === 2) {
+          data = data ? concatBytes([data, container.payload]) : container.payload;
+        } else if (container.type === 3) {
+          // 优先采用本次事务的响应，避免上一次超时后迟到的响应当成本次结果。
+          if (!response || container.transactionId === this.transactionId) {
+            response = container;
+          }
+        }
+      }
+
+      if (!response) {
+        throw new Error(`USB PTP 响应超时或会话中断（${timeoutMs}ms）`);
+      }
+
+      const responseParams = [];
+      for (let off = 0; off + 4 <= response.payload.length; off += 4) {
+        responseParams.push(readU32LE(response.payload, off));
+      }
+      this._diag(`USB 响应 0x${response.code.toString(16)}`);
+      return {
+        type: response.type,
+        responseCode: response.code,
+        transactionId: response.transactionId,
+        params: responseParams,
+        payload: data || new Uint8Array(0),
+      };
+    }
+
     await this.transport.write(cmd);
     if (dataOut && dataOut.length) {
       await this.transport.write(this.buildUsbContainer(2, opCode, this.transactionId, dataOut));
@@ -569,15 +642,91 @@ export class PtpUsbSession {
     this._unsubs.push(this.transport.onData(c => this.buffer.push(c)));
     this._diag('打开 USB 设备...');
     await this.transport.connect();
-    let resp = await this.command(0x1002, [1]); // OpenSession
-    if (resp.responseCode === 0x2019 || resp.responseCode === 0x201E) {
-      this._diag(`USB OpenSession 返回 0x${resp.responseCode.toString(16)}，尝试清理旧会话后重连`);
-      try { await this.command(0x1003, []); } catch {}
-      resp = await this.command(0x1002, [1]);
+
+    // 相机 IN 端点里可能留着上一次主机没读完的响应，先清干净再握手。
+    if (typeof this.transport.drain === 'function') {
+      try {
+        const drained = await this.transport.drain(250);
+        if (drained > 0) this._diag(`清空相机侧残留数据 ${drained} 字节`);
+      } catch (e) {
+        this._diag(`清空残留数据失败：${e.message || e}`);
+      }
     }
-    if (resp.responseCode !== 0x2001 && resp.responseCode !== 0x201E) {
-      throw new Error(`USB OpenSession 返回 0x${resp.responseCode.toString(16)}`);
+
+    const sendOpen = async (label, timeoutMs) => {
+      try {
+        const r = await this.command(0x1002, [1], timeoutMs);
+        this._diag(`${label}：响应 0x${r.responseCode.toString(16).padStart(4, '0')}`);
+        return r;
+      } catch (e) {
+        this._diag(`${label}：${e.message || e}`);
+        return null;
+      }
+    };
+
+    // 相机侧还留着上一次主机的会话时，标准做法是 CloseSession 后重新 OpenSession。
+    const tryOpenWithCleanup = async (label, timeoutMs) => {
+      let r = await sendOpen(label, timeoutMs);
+      if (r && (r.responseCode === 0x2019 || r.responseCode === 0x201E)) {
+        this._diag(`相机报告会话被占用（0x${r.responseCode.toString(16)}），先关闭旧会话`);
+        try {
+          const closed = await this.command(0x1003, [], 3000);
+          this._diag(`CloseSession 响应 0x${closed.responseCode.toString(16).padStart(4, '0')}`);
+        } catch (e) {
+          this._diag(`CloseSession 无响应：${e.message || e}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 300));
+        r = await sendOpen(`${label}（关闭旧会话后）`, timeoutMs);
+      }
+      return r;
+    };
+
+    let resp = await tryOpenWithCleanup('OpenSession', 6000);
+
+    if (!resp || resp.responseCode !== 0x2001) {
+      // 相机 PTP 引擎可能被上一次失败的主机请求卡住，先复位再试。
+      this._diag('会话仍未建立，尝试 PTP DeviceReset(0x1010) 复位相机 PTP 引擎');
+      try {
+        const rst = await this.command(0x1010, [], 2500);
+        this._diag(`DeviceReset 响应 0x${rst.responseCode.toString(16).padStart(4, '0')}`);
+      } catch (e) {
+        this._diag(`DeviceReset 无响应：${e.message || e}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 400));
+      resp = await tryOpenWithCleanup('DeviceReset 后 OpenSession', 8000);
     }
+
+    if (!resp || resp.responseCode !== 0x2001) {
+      // 软件层面能做到的“重新插拔”：释放接口重新占用，再开一次会话。
+      if (typeof this.transport.reset === 'function') {
+        this._diag('重新占用 USB 接口后再试一次');
+        try {
+          await this.transport.reset();
+          if (typeof this.transport.drain === 'function') {
+            const again = await this.transport.drain(250);
+            if (again > 0) this._diag(`重新占用接口后又清掉 ${again} 字节残留`);
+          }
+          await new Promise(resolve => setTimeout(resolve, 300));
+          resp = await tryOpenWithCleanup('重新占用接口后 OpenSession', 8000);
+        } catch (e) {
+          this._diag(`重新占用接口失败：${e.message || e}`);
+        }
+      }
+    }
+
+    if (!resp || resp.responseCode !== 0x2001) {
+      // 探活：个别相机在没有会话时仍会回 GetDeviceInfo，用来区分
+      // “相机完全不回数据”和“只是会话没打开”。
+      try {
+        const info = await this.command(0x1001, [], 2500);
+        this._diag(`诊断 GetDeviceInfo 响应 0x${info.responseCode.toString(16)}，${info.payload.length} 字节`);
+      } catch (e) {
+        this._diag(`诊断 GetDeviceInfo 无响应：${e.message || e}`);
+      }
+      throw new Error('相机没有响应 PTP 会话请求。请拔掉数据线重新插入相机（或重启相机）后再连接。');
+    }
+
+    this.sessionId = 1;
     this.opened = true;
     this._diag('USB 会话已打开');
     return resp;

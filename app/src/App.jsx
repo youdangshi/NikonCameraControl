@@ -10,10 +10,11 @@ import ControlScreen from './screens/ControlScreen.jsx';
 import SettingsScreen from './screens/SettingsScreen.jsx';
 import EditorScreen from './screens/EditorScreen.jsx';
 import BottomNav from './components/BottomNav.jsx';
+import { Aperture, Settings } from 'lucide-react';
 
-const POSE_STORAGE_KEY = 'nikon_pose_guides';
+const POSE_STORAGE_KEY = 'nikon_pose_guides_v2';
 const AI_SETTINGS_KEY = 'nikon_ai_settings';
-const DEFAULT_POSE_GUIDES = { enabled: true, mode: 'standing', opacity: 0.55, color: '#ffffff', scale: 1 };
+const DEFAULT_POSE_GUIDES = { enabled: false, mode: 'standing', opacity: 0.55, color: '#ffffff', scale: 1 };
 const DEFAULT_AI_SETTINGS = {
   provider: 'deepseek',
   endpoint: 'https://api.deepseek.com/v1/chat/completions',
@@ -45,11 +46,10 @@ class AppErrorBoundary extends React.Component {
     if (this.state.error) {
       const text = this.state.error?.message || String(this.state.error);
       return (
-        <div className="h-screen w-screen bg-[#08080e] text-white flex items-center justify-center p-6">
-          <div className="glass max-w-sm w-full p-5 text-center">
-            <div className="text-4xl mb-3">⚠️</div>
+        <div className="h-screen w-screen app-shell text-white flex items-center justify-center p-6">
+          <div className="panel max-w-sm w-full p-5 text-center">
             <h1 className="text-base font-bold">页面遇到错误</h1>
-            <p className="text-xs text-[#9898ac] leading-5 mt-2 break-all">{text}</p>
+            <p className="text-xs text-[var(--text-soft)] leading-5 mt-2 break-all">{text}</p>
             <button className="btn btn-primary w-full mt-4" onClick={() => location.reload()}>重新打开</button>
           </div>
         </div>
@@ -102,9 +102,10 @@ export default function App() {
 function Shell() {
   const loc = useLocation();
   const hideNav = ['/liveview', '/control', '/editor'].includes(loc.pathname);
+  const hideTopBar = loc.pathname === '/liveview';
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#08080e] overflow-hidden">
-      <TopBar />
+    <div className="h-screen w-screen flex flex-col app-shell overflow-hidden">
+      {!hideTopBar && <TopBar />}
       <div className="flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<HomeScreen />} />
@@ -127,25 +128,35 @@ function TopBar() {
   const { state } = useContext(AppContext);
   const navigate = useNavigate();
   const cfg = {
-    disconnected: { cls: 'dot-gray', label: '未连接', col: '#585870' },
-    connecting: { cls: 'dot-yellow', label: '连接中…', col: '#fbbf24' },
-    connected: { cls: 'dot-green', label: '已连接', col: '#4ade80' },
-    session_open: { cls: 'dot-green', label: '就绪', col: '#4ade80' },
-    error: { cls: 'dot-red', label: '错误', col: '#f87171' },
-  }[state.connectionState] || { cls: 'dot-gray', label: '', col: '#585870' };
+    disconnected: { cls: 'dot-gray', label: '未连接', col: 'var(--text-muted)' },
+    connecting: { cls: 'dot-yellow', label: '连接中', col: 'var(--warning)' },
+    connected: { cls: 'dot-green', label: '已连接', col: 'var(--green)' },
+    session_open: { cls: 'dot-green', label: '就绪', col: 'var(--green)' },
+    error: { cls: 'dot-red', label: '错误', col: 'var(--red)' },
+  }[state.connectionState] || { cls: 'dot-gray', label: '', col: 'var(--text-muted)' };
+
+  const modeLabel = state.connectionMode === 'usb'
+    ? 'USB'
+    : state.connectionMode === 'demo'
+      ? '模拟'
+      : state.connectionMode
+        ? state.connectionMode.toUpperCase()
+        : null;
 
   return (
-    <div className="glass-sm flex items-center justify-between px-4 py-2.5 mx-2 my-2 flex-shrink-0" style={{ borderRadius: 12 }}>
-      <div className="flex items-center gap-3">
-        <span className="text-base">📷</span>
-        <span className="font-bold text-sm">妮妮</span>
-        <div className="flex items-center gap-2 pl-3 border-l border-white/10">
+    <header className="top-bar">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="brand-mark"><Aperture size={18} strokeWidth={2.2} /></span>
+        <span className="font-bold text-[15px] tracking-wide">妮妮</span>
+        <div className="flex items-center gap-2 pl-2.5 ml-1 border-l border-[var(--line)] min-w-0">
           <span className={`dot ${cfg.cls}`} />
-          <span className="text-xs font-medium" style={{ color: cfg.col }}>{cfg.label}</span>
-          {state.connectionMode && <span className="badge badge-blue text-[10px]">{state.connectionMode === 'usb' ? '🔌 USB' : state.connectionMode === 'demo' ? '🔬 实验' : '📶 ' + state.connectionMode.toUpperCase()}</span>}
+          <span className="text-[11px] font-semibold truncate" style={{ color: cfg.col }}>{cfg.label}</span>
+          {modeLabel && <span className="badge badge-blue">{modeLabel}</span>}
         </div>
       </div>
-      <button className="btn-icon" onClick={() => navigate('/settings')} title="设置">⚙️</button>
-    </div>
+      <button className="btn-icon ml-auto" onClick={() => navigate('/settings')} title="设置" aria-label="设置">
+        <Settings size={17} />
+      </button>
+    </header>
   );
 }

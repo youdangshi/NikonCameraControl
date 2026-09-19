@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(TcpSocketPlugin.class);
         registerPlugin(UsbPtpPlugin.class);
+        registerPlugin(CameraUiPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

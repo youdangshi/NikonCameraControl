@@ -245,8 +245,10 @@ export const DEFAULT_ADJ = {
   orangeHue: 0, orangeSat: 0, orangeLum: 0,
   yellowHue: 0, yellowSat: 0, yellowLum: 0,
   greenHue: 0, greenSat: 0, greenLum: 0,
+  cyanHue: 0, cyanSat: 0, cyanLum: 0,
   blueHue: 0, blueSat: 0, blueLum: 0,
   purpleHue: 0, purpleSat: 0, purpleLum: 0,
+  magentaHue: 0, magentaSat: 0, magentaLum: 0,
 };
 
 export const DEFAULT_PORTRAIT = {
@@ -267,4 +269,13 @@ export const DEFAULT_MASK = {
   contrast: 0,
   saturation: 0,
   temperature: 0,
+};
+
+export const DEFAULT_WHEELS = {
+  liftX: 0,
+  liftY: 0,
+  gammaX: 0,
+  gammaY: 0,
+  gainX: 0,
+  gainY: 0,
 };

@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   STYLE_PRESETS, PORTRAIT_STEPS, GENRE_GUIDE,
-  DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK,
+  DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK, DEFAULT_WHEELS,
 } from '../editor/presets.js';
-import { renderPreview, exportEdited, loadImage } from '../editor/imageEngine.js';
+import { renderPreview, exportEdited, loadImage, parseCubeLut } from '../editor/imageEngine.js';
+import { parseNp3 } from '../editor/np3.js';
 import {
-  ArrowLeft, BookOpen, Check, Download, ImageOff, Palette, RotateCcw, ScanLine,
+  ArrowLeft, BookOpen, Check, CloudSun, Download, ImageOff, Palette, RotateCcw, ScanLine,
   SlidersHorizontal, Sparkles, UserRound,
 } from 'lucide-react';
 
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'basic', label: '基础调色', Icon: SlidersHorizontal },
   { id: 'ps', label: '专业修图（PS）', Icon: Palette },
   { id: 'mask', label: '局部蒙版', Icon: ScanLine },
+  { id: 'nikon', label: '尼康云创', Icon: CloudSun },
   { id: 'presets', label: '风格预设', Icon: Sparkles },
   { id: 'guide', label: '修图指南', Icon: BookOpen },
 ];
@@ -73,6 +75,8 @@ const PS_GROUPS = [
     ],
   },
   { id: 'mix', label: '混色', title: '颜色混合', items: [] },
+  { id: 'wheels', label: '色彩轮', title: '色彩轮', items: [] },
+  { id: 'lut', label: 'LUT', title: 'LUT 查找表', items: [] },
 ];
 
 const COLOR_MIX_ITEMS = [
@@ -80,8 +84,10 @@ const COLOR_MIX_ITEMS = [
   ['orange', '橙色', '#f97316'],
   ['yellow', '黄色', '#eab308'],
   ['green', '绿色', '#22c55e'],
+  ['cyan', '青色', '#06b6d4'],
   ['blue', '蓝色', '#3b82f6'],
   ['purple', '紫色', '#a855f7'],
+  ['magenta', '洋红', '#ec4899'],
 ];
 
 function Slider({ label, value = 0, onChange, min = -100, max = 100, step = 1, accent = '#3b82f6' }) {
@@ -123,6 +129,72 @@ function ColorMixer({ adj, onChange }) {
       <Slider label={`${current[1]} · 色相`} value={adj[`${color}Hue`]} onChange={value => onChange(`${color}Hue`, value)} accent={current[2]} />
       <Slider label={`${current[1]} · 饱和度`} value={adj[`${color}Sat`]} onChange={value => onChange(`${color}Sat`, value)} accent={current[2]} />
       <Slider label={`${current[1]} · 明度`} value={adj[`${color}Lum`]} onChange={value => onChange(`${color}Lum`, value)} accent={current[2]} />
+    </div>
+  );
+}
+
+function ColorWheel({ label, xKey, yKey, wheels, onChange }) {
+  const update = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    let x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    let y = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+    const distance = Math.hypot(x, y);
+    if (distance > 1) {
+      x /= distance;
+      y /= distance;
+    }
+    onChange(xKey, Math.round(x * 100));
+    onChange(yKey, Math.round(-y * 100));
+  };
+
+  return (
+    <div className="text-center">
+      <div
+        className="relative mx-auto w-24 h-24 rounded-full border border-white/20 touch-none"
+        style={{ background: 'conic-gradient(#ef4444, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ef4444)' }}
+        onPointerDown={event => {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          update(event);
+        }}
+        onPointerMove={event => event.currentTarget.hasPointerCapture?.(event.pointerId) && update(event)}
+      >
+        <div className="absolute inset-2 rounded-full bg-black/45 backdrop-blur-sm" />
+        <div
+          className="absolute w-5 h-5 rounded-full border-2 border-white bg-black/40 shadow-lg"
+          style={{
+            left: `${50 + (wheels[xKey] || 0) / 2}%`,
+            top: `${50 - (wheels[yKey] || 0) / 2}%`,
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
+      </div>
+      <p className="text-[10px] font-semibold mt-2">{label}</p>
+      <p className="mono text-[9px] text-[var(--text-muted)] mt-0.5">
+        {wheels[xKey] > 0 ? '+' : ''}{wheels[xKey] || 0} / {wheels[yKey] > 0 ? '+' : ''}{wheels[yKey] || 0}
+      </p>
+    </div>
+  );
+}
+
+function ColorWheels({ wheels, onChange }) {
+  return (
+    <div>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <ColorWheel label="阴影" xKey="liftX" yKey="liftY" wheels={wheels} onChange={onChange} />
+        <ColorWheel label="中间调" xKey="gammaX" yKey="gammaY" wheels={wheels} onChange={onChange} />
+        <ColorWheel label="高光" xKey="gainX" yKey="gainY" wheels={wheels} onChange={onChange} />
+      </div>
+      <button
+        className="btn btn-secondary w-full"
+        onClick={() => {
+          onChange('liftX', 0); onChange('liftY', 0);
+          onChange('gammaX', 0); onChange('gammaY', 0);
+          onChange('gainX', 0); onChange('gainY', 0);
+        }}
+      >
+        <RotateCcw size={14} /> 重置色彩轮
+      </button>
     </div>
   );
 }
@@ -257,6 +329,10 @@ export default function EditorScreen() {
   const [adj, setAdj] = useState({ ...DEFAULT_ADJ });
   const [portrait, setPortrait] = useState({ ...DEFAULT_PORTRAIT });
   const [mask, setMask] = useState({ ...DEFAULT_MASK });
+  const [wheels, setWheels] = useState({ ...DEFAULT_WHEELS });
+  const [lut, setLut] = useState(null);
+  const [lutStrength, setLutStrength] = useState(100);
+  const [np3Preset, setNp3Preset] = useState(null);
   const [preview, setPreview] = useState('');
   const [original, setOriginal] = useState('');
   const [histogram, setHistogram] = useState(null);
@@ -266,6 +342,8 @@ export default function EditorScreen() {
   const [msg, setMsg] = useState('');
   const [fileInput, setFileInput] = useState(null);
   const fileRef = useRef(null);
+  const lutRef = useRef(null);
+  const np3Ref = useRef(null);
   const renderTimer = useRef(null);
 
   useEffect(() => {
@@ -318,7 +396,11 @@ export default function EditorScreen() {
     if (renderTimer.current) clearTimeout(renderTimer.current);
     renderTimer.current = setTimeout(async () => {
       try {
-        const canvas = await renderPreview(source, { adj, portrait, mask });
+        const canvas = await renderPreview(source, {
+          adj, portrait, mask, wheels, lut, lutStrength,
+          np3Grading: np3Preset?.grading || null,
+          np3ToneCurve: np3Preset?.toneCurve || null,
+        });
         setPreview(canvas.toDataURL('image/jpeg', 0.88));
       } catch (e) {
         setMsg('预览失败：' + (e.message || String(e)));
@@ -327,7 +409,7 @@ export default function EditorScreen() {
       }
     }, 140);
     return () => { if (renderTimer.current) clearTimeout(renderTimer.current); };
-  }, [source, adj, portrait, mask]);
+  }, [source, adj, portrait, mask, wheels, lut, lutStrength, np3Preset]);
 
   const pickFile = (e) => {
     const file = e.target.files?.[0];
@@ -336,16 +418,53 @@ export default function EditorScreen() {
     reader.onload = () => {
       const url = String(reader.result);
       setSource(url); setName(file.name); setMsg('');
-      setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setOriginal('');
+      setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setWheels({ ...DEFAULT_WHEELS }); setLut(null); setLutStrength(100); setNp3Preset(null); setOriginal('');
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const reset = () => { setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setMsg('已重置'); };
+  const pickLut = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = parseCubeLut(String(reader.result));
+        setLut({ ...parsed, fileName: file.name });
+        setLutStrength(100);
+        setMsg(`已载入 LUT「${parsed.title}」`);
+      } catch (error) {
+        setMsg(`LUT 导入失败：${error.message || error}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const pickNp3 = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = parseNp3(reader.result);
+        setAdj(current => ({ ...current, ...parsed.adjustments, ...parsed.colorMix }));
+        setNp3Preset({ ...parsed, fileName: file.name });
+        setMsg(`已应用尼康云创「${parsed.name}」`);
+      } catch (error) {
+        setMsg(`NP3 导入失败：${error.message || error}`);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const reset = () => { setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setWheels({ ...DEFAULT_WHEELS }); setLut(null); setLutStrength(100); setNp3Preset(null); setMsg('已重置'); };
   const setAdjField = (k, v) => setAdj(a => ({ ...a, [k]: v }));
   const setPortraitField = (k, v) => setPortrait(p => ({ ...p, [k]: v }));
   const setMaskField = (k, v) => setMask(current => ({ ...current, [k]: v }));
+  const setWheelField = (k, v) => setWheels(current => ({ ...current, [k]: v }));
 
   const applyPreset = (preset) => {
     if (preset.category === '人像') {
@@ -376,7 +495,11 @@ export default function EditorScreen() {
     if (!source) return;
     setExporting(true); setMsg('');
     try {
-      const dataUrl = await exportEdited(source, { adj, portrait, mask });
+      const dataUrl = await exportEdited(source, {
+        adj, portrait, mask, wheels, lut, lutStrength,
+        np3Grading: np3Preset?.grading || null,
+        np3ToneCurve: np3Preset?.toneCurve || null,
+      });
       const a = document.createElement('a');
       a.href = dataUrl;
       a.download = (name.replace(/\.[^.]+$/, '') || 'photo') + '_edited.jpg';
@@ -500,6 +623,32 @@ export default function EditorScreen() {
                 </>
               ) : psGroup === 'mix' ? (
                 <ColorMixer adj={adj} onChange={setAdjField} />
+              ) : psGroup === 'wheels' ? (
+                <ColorWheels wheels={wheels} onChange={setWheelField} />
+              ) : psGroup === 'lut' ? (
+                <div className="space-y-3">
+                  <div className="panel p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold truncate">{lut?.title || '尚未载入 LUT'}</p>
+                        <p className="text-[9px] text-[var(--text-muted)] mt-1">
+                          {lut ? `${lut.size} × ${lut.size} × ${lut.size} · ${lut.fileName || ''}` : '支持 Adobe Cube 3D LUT 文件'}
+                        </p>
+                      </div>
+                      <button className="btn btn-secondary flex-shrink-0" onClick={() => lutRef.current?.click()}>
+                        导入 .cube
+                      </button>
+                    </div>
+                    {lut && (
+                      <>
+                        <div className="divider my-3" />
+                        <Slider label="LUT 强度" value={lutStrength} min={0} max={100} onChange={setLutStrength} />
+                        <button className="btn btn-danger w-full" onClick={() => setLut(null)}>移除 LUT</button>
+                      </>
+                    )}
+                  </div>
+                  <input ref={lutRef} type="file" accept=".cube,text/plain" className="hidden" onChange={pickLut} />
+                </div>
               ) : (
                 <>
                   <p className="text-[11px] font-semibold text-[var(--text-muted)] mb-3">
@@ -573,6 +722,72 @@ export default function EditorScreen() {
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {tab === 'nikon' && (
+            <div className="space-y-3">
+              <div className="panel p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-[var(--accent-soft)] border border-[rgba(255,212,0,.24)] flex items-center justify-center flex-shrink-0">
+                    <CloudSun size={20} className="text-[var(--accent)]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">尼康云创</p>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-1 leading-4">
+                      导入 Nikon Flexible Color Picture Control 的 `.NP3` 文件，手机侧近似预览优化校准、颜色混合、色彩分级和自定义曲线。
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-4">
+                  <button className="btn btn-primary" onClick={() => np3Ref.current?.click()}>导入 .NP3</button>
+                  <button className="btn btn-secondary" disabled={!np3Preset} onClick={() => {
+                    setAdj(current => ({ ...current, ...np3Preset.adjustments, ...np3Preset.colorMix }));
+                    setMsg(`已重新应用「${np3Preset.name}」`);
+                  }}>重新应用</button>
+                </div>
+              </div>
+
+              {np3Preset ? (
+                <div className="panel p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{np3Preset.name}</p>
+                      <p className="text-[10px] text-[var(--text-muted)] mt-1 truncate">{np3Preset.fileName}</p>
+                    </div>
+                    <button className="btn btn-danger" onClick={() => setNp3Preset(null)}>移除</button>
+                  </div>
+                  {np3Preset.comment && <p className="text-[10px] text-[var(--text-soft)] leading-4 mt-3">{np3Preset.comment}</p>}
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <span className="badge badge-yellow">优化校准已应用</span>
+                    {np3Preset.toneCurve && <span className="badge badge-blue">自定义曲线</span>}
+                    <span className="badge badge-green">颜色混合</span>
+                    <span className="badge badge-blue">色彩分级</span>
+                  </div>
+                  <div className="divider my-3" />
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    {[
+                      ['对比度', np3Preset.adjustments.contrast],
+                      ['高光', np3Preset.adjustments.highlights],
+                      ['阴影', np3Preset.adjustments.shadows],
+                      ['饱和度', np3Preset.adjustments.saturation],
+                      ['清晰度', np3Preset.adjustments.clarity],
+                      ['锐化', np3Preset.adjustments.sharpen],
+                    ].map(([label, value]) => (
+                      <div key={label} className="flex justify-between rounded bg-black/20 px-2 py-2">
+                        <span className="text-[var(--text-muted)]">{label}</span>
+                        <span className="mono">{value > 0 ? '+' : ''}{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="panel p-5 text-center">
+                  <CloudSun size={24} className="mx-auto text-[var(--text-muted)]" />
+                  <p className="text-[11px] text-[var(--text-soft)] mt-2">尚未导入尼康云创预设</p>
+                </div>
+              )}
+              <input ref={np3Ref} type="file" accept=".NP3,.np3,application/octet-stream" className="hidden" onChange={pickNp3} />
             </div>
           )}
 

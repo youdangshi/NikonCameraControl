@@ -10,7 +10,7 @@
  * 出于性能考虑：预览按 maxDim=1100 处理，导出按 maxDim=2600。
  */
 
-import { DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK } from './presets.js';
+import { DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK, DEFAULT_WHEELS } from './presets.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const num = (v, d = 0) => (typeof v === 'number' && !Number.isNaN(v) ? v : d);
@@ -85,10 +85,14 @@ function blurredCanvas(source, blurPx) {
  * @param {{adj?:object, portrait?:object}} opts
  * @param {number} maxDim
  */
-export function renderEdited(img, { adj = {}, portrait = {}, mask = {} } = {}, maxDim = 1100) {
+export function renderEdited(img, {
+  adj = {}, portrait = {}, mask = {}, wheels = {}, lut = null, lutStrength = 100,
+  np3Grading = null, np3ToneCurve = null,
+} = {}, maxDim = 1100) {
   const A = { ...DEFAULT_ADJ, ...adj };
   const P = { ...DEFAULT_PORTRAIT, ...portrait };
   const M = { ...DEFAULT_MASK, ...mask };
+  const W = { ...DEFAULT_WHEELS, ...wheels };
   const { w, h } = targetSize(img, maxDim);
   const canvas = makeCanvas(w, h);
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -98,10 +102,13 @@ export function renderEdited(img, { adj = {}, portrait = {}, mask = {} } = {}, m
 
   const imageData = ctx.getImageData(0, 0, w, h);
   basicAdjust(imageData, A);
-  applyToneCurve(imageData, A);
+  applyToneCurve(imageData, A, np3ToneCurve);
   applyColorMixer(imageData, A);
   applyDenoise(imageData, A);
   applyMask(imageData, M, w, h);
+  applyColorWheels(imageData, W);
+  applyNikonGrading(imageData, np3Grading);
+  applyLut(imageData, lut, lutStrength);
   applyPortrait(imageData, A, P, canvas, w, h);
   ctx.putImageData(imageData, 0, 0);
 
@@ -221,14 +228,24 @@ function applyUnsharp(data, sharpen, clarity, texture = 0) {
   }
 }
 
-function applyToneCurve(imageData, A) {
+function applyToneCurve(imageData, A, np3ToneCurve = null) {
   const black = num(A.toneBlack), shadow = num(A.toneShadow), mid = num(A.toneMid);
   const highlight = num(A.toneHighlight), white = num(A.toneWhite);
-  if (!black && !shadow && !mid && !highlight && !white) return;
+  const hasNp3Curve = Array.isArray(np3ToneCurve) && np3ToneCurve.length >= 257;
+  if (!hasNp3Curve && !black && !shadow && !mid && !highlight && !white) return;
 
   const d = imageData.data;
   for (let i = 0; i < d.length; i += 4) {
     const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    if (hasNp3Curve) {
+      const source = clamp(Math.round((lum / 255) * 256), 0, 256);
+      const target = clamp(num(np3ToneCurve[source], source / 256 * 32767) / 32767 * 255, 0, 255);
+      const curveDelta = target - lum;
+      d[i] = clamp(d[i] + curveDelta, 0, 255);
+      d[i + 1] = clamp(d[i + 1] + curveDelta, 0, 255);
+      d[i + 2] = clamp(d[i + 2] + curveDelta, 0, 255);
+      continue;
+    }
     const wb = clamp((45 - lum) / 45, 0, 1);
     const ws = clamp(1 - Math.abs(lum - 85) / 55, 0, 1);
     const wm = clamp(1 - Math.abs(lum - 142) / 64, 0, 1);
@@ -241,8 +258,29 @@ function applyToneCurve(imageData, A) {
   }
 }
 
+function applyNikonGrading(imageData, grading) {
+  if (!grading || (!grading.shadows && !grading.midTone && !grading.highlights)) return;
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) / 255;
+    const shadowWeight = Math.pow(1 - lum, 2);
+    const midWeight = Math.max(0, 1 - Math.abs(lum - 0.5) * 2);
+    const highlightWeight = lum * lum;
+    for (const [region, weight] of [
+      [grading.shadows, shadowWeight],
+      [grading.midTone, midWeight],
+      [grading.highlights, highlightWeight],
+    ]) {
+      if (!region || weight <= 0) continue;
+      d[i] = clamp(d[i] + (region.r || 0) * weight * 255, 0, 255);
+      d[i + 1] = clamp(d[i + 1] + (region.g || 0) * weight * 255, 0, 255);
+      d[i + 2] = clamp(d[i + 2] + (region.b || 0) * weight * 255, 0, 255);
+    }
+  }
+}
+
 const COLOR_MIX_ANCHORS = [
-  ['red', 0], ['orange', 32], ['yellow', 60], ['green', 120], ['blue', 220], ['purple', 285],
+  ['red', 0], ['orange', 32], ['yellow', 60], ['green', 120], ['cyan', 180], ['blue', 220], ['purple', 285], ['magenta', 320],
 ];
 
 function hueDistance(a, b) {
@@ -416,6 +454,125 @@ function applyMask(imageData, M, w, h) {
       d[i] = d[i] * (1 - weight) + clamp(r, 0, 255) * weight;
       d[i + 1] = d[i + 1] * (1 - weight) + clamp(g, 0, 255) * weight;
       d[i + 2] = d[i + 2] * (1 - weight) + clamp(b, 0, 255) * weight;
+    }
+  }
+}
+
+function applyColorWheels(imageData, W) {
+  const hasWheels = ['liftX', 'liftY', 'gammaX', 'gammaY', 'gainX', 'gainY'].some(key => num(W[key]));
+  if (!hasWheels) return;
+  const d = imageData.data;
+  const liftX = num(W.liftX) / 100;
+  const liftY = num(W.liftY) / 100;
+  const gammaX = num(W.gammaX) / 100;
+  const gammaY = num(W.gammaY) / 100;
+  const gainX = num(W.gainX) / 100;
+  const gainY = num(W.gainY) / 100;
+
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255;
+    const lum = r * 0.299 + g * 0.587 + b * 0.114;
+    const shadowWeight = Math.pow(1 - lum, 2);
+    const midWeight = Math.max(0, 1 - Math.abs(lum - 0.5) * 2);
+    const highWeight = lum * lum;
+
+    r += (0.45 * liftX + 0.45 * liftY) * 0.34 * shadowWeight;
+    g += (-0.45 * liftX + 0.45 * liftY) * 0.34 * shadowWeight;
+    b += (-0.25 * liftX - 0.55 * liftY) * 0.34 * shadowWeight;
+
+    const gammaR = (0.45 * gammaX + 0.45 * gammaY) * 0.22 * midWeight;
+    const gammaG = (-0.45 * gammaX + 0.45 * gammaY) * 0.22 * midWeight;
+    const gammaB = (-0.25 * gammaX - 0.55 * gammaY) * 0.22 * midWeight;
+    r = Math.pow(clamp(r, 0, 1), 1 / Math.max(0.2, 1 + gammaR));
+    g = Math.pow(clamp(g, 0, 1), 1 / Math.max(0.2, 1 + gammaG));
+    b = Math.pow(clamp(b, 0, 1), 1 / Math.max(0.2, 1 + gammaB));
+
+    r *= 1 + (0.45 * gainX + 0.45 * gainY) * 0.25 * highWeight;
+    g *= 1 + (-0.45 * gainX + 0.45 * gainY) * 0.25 * highWeight;
+    b *= 1 + (-0.25 * gainX - 0.55 * gainY) * 0.25 * highWeight;
+    d[i] = clamp(r * 255, 0, 255);
+    d[i + 1] = clamp(g * 255, 0, 255);
+    d[i + 2] = clamp(b * 255, 0, 255);
+  }
+}
+
+export function parseCubeLut(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const values = [];
+  let size = 0;
+  let title = 'LUT';
+  let domainMin = [0, 0, 0];
+  let domainMax = [1, 1, 1];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const upper = line.toUpperCase();
+    if (upper.startsWith('TITLE')) {
+      title = line.replace(/^TITLE\s*/i, '').replace(/^"|"$/g, '') || title;
+      continue;
+    }
+    if (upper.startsWith('LUT_3D_SIZE')) {
+      size = Number.parseInt(line.split(/\s+/)[1], 10) || 0;
+      continue;
+    }
+    if (upper.startsWith('DOMAIN_MIN')) {
+      domainMin = line.split(/\s+/).slice(1, 4).map(Number);
+      continue;
+    }
+    if (upper.startsWith('DOMAIN_MAX')) {
+      domainMax = line.split(/\s+/).slice(1, 4).map(Number);
+      continue;
+    }
+    if (/^[-+.\deE]+\s+[-+.\deE]+\s+[-+.\deE]+/.test(line)) {
+      const parts = line.split(/\s+/).slice(0, 3).map(Number);
+      if (parts.length === 3 && parts.every(Number.isFinite)) values.push(...parts);
+    }
+  }
+  const expected = size * size * size * 3;
+  if (!size || size < 2 || size > 65 || values.length !== expected) {
+    throw new Error(`LUT 数据无效：尺寸 ${size || '未知'}，需要 ${expected || 0} 个数值，实际 ${values.length}`);
+  }
+  return {
+    title,
+    size,
+    domainMin,
+    domainMax,
+    data: new Float32Array(values),
+  };
+}
+
+function applyLut(imageData, lut, strengthValue) {
+  if (!lut?.data || !lut.size) return;
+  const strength = clamp(num(strengthValue, 100), 0, 100) / 100;
+  if (strength <= 0.001) return;
+  const d = imageData.data;
+  const size = lut.size;
+  const maxIndex = size - 1;
+  const domainMin = lut.domainMin || [0, 0, 0];
+  const domainMax = lut.domainMax || [1, 1, 1];
+  const span = domainMax.map((value, index) => Math.max(1e-6, value - domainMin[index]));
+  const sample = (r, g, b, channel) => {
+    const index = ((b * size + g) * size + r) * 3 + channel;
+    return lut.data[index] ?? 0;
+  };
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  for (let i = 0; i < d.length; i += 4) {
+    const nr = clamp((d[i] / 255 - domainMin[0]) / span[0], 0, 1) * maxIndex;
+    const ng = clamp((d[i + 1] / 255 - domainMin[1]) / span[1], 0, 1) * maxIndex;
+    const nb = clamp((d[i + 2] / 255 - domainMin[2]) / span[2], 0, 1) * maxIndex;
+    const r0 = Math.floor(nr), g0 = Math.floor(ng), b0 = Math.floor(nb);
+    const r1 = Math.min(maxIndex, r0 + 1), g1 = Math.min(maxIndex, g0 + 1), b1 = Math.min(maxIndex, b0 + 1);
+    const rt = nr - r0, gt = ng - g0, bt = nb - b0;
+    for (let channel = 0; channel < 3; channel++) {
+      const c00 = lerp(sample(r0, g0, b0, channel), sample(r1, g0, b0, channel), rt);
+      const c10 = lerp(sample(r0, g1, b0, channel), sample(r1, g1, b0, channel), rt);
+      const c01 = lerp(sample(r0, g0, b1, channel), sample(r1, g0, b1, channel), rt);
+      const c11 = lerp(sample(r0, g1, b1, channel), sample(r1, g1, b1, channel), rt);
+      const c0 = lerp(c00, c10, gt);
+      const c1 = lerp(c01, c11, gt);
+      const value = clamp(lerp(c0, c1, bt) * 255, 0, 255);
+      d[i + channel] = d[i + channel] * (1 - strength) + value * strength;
     }
   }
 }

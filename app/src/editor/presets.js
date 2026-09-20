@@ -253,3 +253,18 @@ export const DEFAULT_PORTRAIT = {
   smooth: 0, whiten: 0, rosy: 0, skinBrighten: 0, blemish: 0,
   teethWhite: 0, lipColor: 0, faceSlim: 0, eyeLarge: 0, clarityFace: 0,
 };
+
+export const DEFAULT_MASK = {
+  type: 'none',
+  centerX: 50,
+  centerY: 50,
+  radius: 38,
+  feather: 48,
+  angle: 0,
+  position: 50,
+  invert: false,
+  exposure: 0,
+  contrast: 0,
+  saturation: 0,
+  temperature: 0,
+};

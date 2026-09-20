@@ -41,6 +41,7 @@ const OC = {
   NikonStartLiveView: 0x9201,
   NikonEndLiveView: 0x9202,
   NikonGetLiveViewImg: 0x9203,
+  NikonChangeApplicationMode: 0x9435,
   NikonAfDrive: 0x90C1,
   NikonInitiateCaptureRecInMedia: 0x9207,
 };
@@ -409,7 +410,7 @@ export const camera = {
         mobileSessionProfile = null;
         emit('status', { state: 'error', mode, profile, host, port, error: message, direct: true });
         emit('error', { error: message, direct: true });
-      });
+      }, { clientName: profile === 'pc' ? 'Nikon PC' : 'Nini' });
       mobileSession = session;
       mobileSessionMode = mode;
       mobileSessionProfile = profile;
@@ -542,6 +543,28 @@ export const camera = {
         error.code = 'STA_LIVEVIEW_UNSUPPORTED';
         throw error;
       }
+      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'pc') {
+        try {
+          const setProp = async (propCode, value) => {
+            const resp = await mobileSession.command(
+              OC.SetDevicePropValue,
+              [propCode],
+              6000,
+              encodePropValue(propCode, value),
+            );
+            emit('diagnostic', `PC 控制属性 0x${propCode.toString(16)} 设置响应：0x${Number(resp.responseCode).toString(16)}`);
+            return resp;
+          };
+          await setProp(PTP_PROP.NikonApplicationMode, 1);
+          const mode = await mobileSession.command(OC.NikonChangeApplicationMode, [1], 8000);
+          emit('diagnostic', `PC 控制模式切换响应：0x${Number(mode.responseCode).toString(16)}`);
+          await setProp(PTP_PROP.NikonRecordingMedia, 1);
+          await setProp(PTP_PROP.NikonLiveViewSelector, 0);
+          await new Promise(resolve => setTimeout(resolve, 180));
+        } catch (e) {
+          emit('diagnostic', `PC 控制模式切换未确认：${e.message || e}，继续尝试取景`);
+        }
+      }
       const resp = await mobileSession.command(OC.NikonStartLiveView, [], 10000);
       const success = resp.responseCode === 0x2001 || resp.responseCode === 0x201E;
       emit('liveview', { running: success });
@@ -556,6 +579,9 @@ export const camera = {
     if (demoCam) return demoCam.stopLiveView();
     if (mobileSession) {
       try { await mobileSession.command(OC.NikonEndLiveView, []); } catch {}
+      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'pc') {
+        try { await mobileSession.command(OC.NikonChangeApplicationMode, [0], 5000); } catch {}
+      }
       emit('liveview', { running: false });
       return { success: true };
     }

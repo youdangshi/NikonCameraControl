@@ -10,7 +10,7 @@
  * 出于性能考虑：预览按 maxDim=1100 处理，导出按 maxDim=2600。
  */
 
-import { DEFAULT_ADJ, DEFAULT_PORTRAIT } from './presets.js';
+import { DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK } from './presets.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const num = (v, d = 0) => (typeof v === 'number' && !Number.isNaN(v) ? v : d);
@@ -85,9 +85,10 @@ function blurredCanvas(source, blurPx) {
  * @param {{adj?:object, portrait?:object}} opts
  * @param {number} maxDim
  */
-export function renderEdited(img, { adj = {}, portrait = {} } = {}, maxDim = 1100) {
+export function renderEdited(img, { adj = {}, portrait = {}, mask = {} } = {}, maxDim = 1100) {
   const A = { ...DEFAULT_ADJ, ...adj };
   const P = { ...DEFAULT_PORTRAIT, ...portrait };
+  const M = { ...DEFAULT_MASK, ...mask };
   const { w, h } = targetSize(img, maxDim);
   const canvas = makeCanvas(w, h);
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -100,6 +101,7 @@ export function renderEdited(img, { adj = {}, portrait = {} } = {}, maxDim = 110
   applyToneCurve(imageData, A);
   applyColorMixer(imageData, A);
   applyDenoise(imageData, A);
+  applyMask(imageData, M, w, h);
   applyPortrait(imageData, A, P, canvas, w, h);
   ctx.putImageData(imageData, 0, 0);
 
@@ -343,6 +345,77 @@ function applyDenoise(imageData, A) {
         const avg = weight ? sum / weight : center;
         out[i + c] = center * (1 - amount) + avg * amount;
       }
+    }
+  }
+}
+
+function smoothMask(value) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function applyMask(imageData, M, w, h) {
+  if (M.type === 'none') return;
+  const exposure = num(M.exposure);
+  const contrast = num(M.contrast);
+  const saturation = num(M.saturation);
+  const temperature = num(M.temperature);
+  if (!exposure && !contrast && !saturation && !temperature) return;
+
+  const d = imageData.data;
+  const cx = clamp(num(M.centerX, 50), 0, 100) / 100;
+  const cy = clamp(num(M.centerY, 50), 0, 100) / 100;
+  const radius = Math.max(0.05, clamp(num(M.radius, 38), 5, 100) / 100);
+  const feather = clamp(num(M.feather, 48), 0, 100) / 100;
+  const angle = (num(M.angle, 0) * Math.PI) / 180;
+  const position = clamp(num(M.position, 50), 0, 100) / 100;
+  const aspect = w / Math.max(1, h);
+  const shortSide = Math.min(w, h);
+  const brightness = 1 + (exposure / 100) * 0.9;
+  const contrastScale = 1 + (contrast / 100) * 1.3;
+  const saturationScale = 1 + (saturation / 100) * 1.5;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const nx = x / Math.max(1, w - 1);
+      const ny = y / Math.max(1, h - 1);
+      let weight;
+      if (M.type === 'radial') {
+        const dx = (nx - cx) * aspect * shortSide;
+        const dy = (ny - cy) * shortSide;
+        const distance = clamp(Math.sqrt(dx * dx + dy * dy) / (radius * shortSide), 0, 1.5);
+        const edge = Math.max(0.001, feather);
+        weight = 1 - smoothMask((distance - (1 - edge)) / edge);
+      } else if (M.type === 'linear') {
+        const dx = nx - 0.5;
+        const dy = ny - 0.5;
+        const projected = 0.5 + dx * Math.cos(angle) + dy * Math.sin(angle);
+        const edge = Math.max(0.04, feather * 1.2);
+        weight = smoothMask((projected - (position - edge)) / (edge * 2));
+      } else {
+        continue;
+      }
+      if (M.invert) weight = 1 - weight;
+      if (weight <= 0.001) continue;
+
+      const i = (y * w + x) * 4;
+      let r = d[i] * brightness;
+      let g = d[i + 1] * brightness;
+      let b = d[i + 2] * brightness;
+      r += temperature * 0.34;
+      g += temperature * 0.02;
+      b -= temperature * 0.34;
+      r = (r - 128) * contrastScale + 128;
+      g = (g - 128) * contrastScale + 128;
+      b = (b - 128) * contrastScale + 128;
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+      r = lum + (r - lum) * saturationScale;
+      g = lum + (g - lum) * saturationScale;
+      b = lum + (b - lum) * saturationScale;
+
+      d[i] = d[i] * (1 - weight) + clamp(r, 0, 255) * weight;
+      d[i + 1] = d[i + 1] * (1 - weight) + clamp(g, 0, 255) * weight;
+      d[i + 2] = d[i + 2] * (1 - weight) + clamp(b, 0, 255) * weight;
     }
   }
 }

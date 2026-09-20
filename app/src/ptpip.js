@@ -269,6 +269,7 @@ export class PtpIpSession {
     this.transactionId = 0;
     this.onDiagnose = opts.onDiagnose || (() => {});
     this.onLost = opts.onLost || (() => {});
+    this.clientName = opts.clientName || 'Nini';
     this._unsubs = [];
     this._commandQueue = Promise.resolve();
     this.closed = false;
@@ -349,7 +350,7 @@ export class PtpIpSession {
 
   buildInitCommand() {
     const guid = ptpClientGuid();
-    const name = utf16leBytes('Nini');
+    const name = utf16leBytes(this.clientName);
     const payload = new Uint8Array(16 + name.length + 2 + 4);
     payload.set(guid, 0);
     payload.set(name, 16);
@@ -491,9 +492,14 @@ export class PtpIpSession {
 }
 
 // ─── 常用命令便捷封装 ──────────────────────────────────
-export async function openSession(host, port, onDiagnose, onError, onLost) {
+export async function openSession(host, port, onDiagnose, onError, onLost, options = {}) {
   const transport = createTransport();
-  const session = new PtpIpSession(transport, { onDiagnose, onError, onLost });
+  const session = new PtpIpSession(transport, {
+    onDiagnose,
+    onError,
+    onLost,
+    clientName: options.clientName,
+  });
   try {
     await session.open(host, port);
     if (typeof transport.onState === 'function') {

@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   STYLE_PRESETS, PORTRAIT_STEPS, GENRE_GUIDE,
-  DEFAULT_ADJ, DEFAULT_PORTRAIT,
+  DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK,
 } from '../editor/presets.js';
 import { renderPreview, exportEdited, loadImage } from '../editor/imageEngine.js';
 import {
-  ArrowLeft, BookOpen, Check, Download, ImageOff, Palette, RotateCcw,
+  ArrowLeft, BookOpen, Check, Download, ImageOff, Palette, RotateCcw, ScanLine,
   SlidersHorizontal, Sparkles, UserRound,
 } from 'lucide-react';
 
@@ -14,6 +14,7 @@ const TABS = [
   { id: 'portrait', label: '一键人像', Icon: UserRound },
   { id: 'basic', label: '基础调色', Icon: SlidersHorizontal },
   { id: 'ps', label: '专业修图（PS）', Icon: Palette },
+  { id: 'mask', label: '局部蒙版', Icon: ScanLine },
   { id: 'presets', label: '风格预设', Icon: Sparkles },
   { id: 'guide', label: '修图指南', Icon: BookOpen },
 ];
@@ -29,6 +30,10 @@ const PORTRAIT_ITEMS = [
   ['smooth', '磨皮'], ['whiten', '美白'], ['rosy', '红润'], ['skinBrighten', '肤色提亮'],
   ['blemish', '瑕疵修复'], ['teethWhite', '牙齿美白'], ['lipColor', '唇色'], ['eyeLarge', '大眼'],
   ['faceSlim', '瘦脸'],
+];
+
+const MASK_ITEMS = [
+  ['exposure', '曝光'], ['contrast', '对比度'], ['saturation', '饱和度'], ['temperature', '色温'],
 ];
 
 const PS_GROUPS = [
@@ -251,6 +256,7 @@ export default function EditorScreen() {
   const [quickStrength, setQuickStrength] = useState(70);
   const [adj, setAdj] = useState({ ...DEFAULT_ADJ });
   const [portrait, setPortrait] = useState({ ...DEFAULT_PORTRAIT });
+  const [mask, setMask] = useState({ ...DEFAULT_MASK });
   const [preview, setPreview] = useState('');
   const [original, setOriginal] = useState('');
   const [histogram, setHistogram] = useState(null);
@@ -312,7 +318,7 @@ export default function EditorScreen() {
     if (renderTimer.current) clearTimeout(renderTimer.current);
     renderTimer.current = setTimeout(async () => {
       try {
-        const canvas = await renderPreview(source, { adj, portrait });
+        const canvas = await renderPreview(source, { adj, portrait, mask });
         setPreview(canvas.toDataURL('image/jpeg', 0.88));
       } catch (e) {
         setMsg('预览失败：' + (e.message || String(e)));
@@ -321,7 +327,7 @@ export default function EditorScreen() {
       }
     }, 140);
     return () => { if (renderTimer.current) clearTimeout(renderTimer.current); };
-  }, [source, adj, portrait]);
+  }, [source, adj, portrait, mask]);
 
   const pickFile = (e) => {
     const file = e.target.files?.[0];
@@ -330,15 +336,16 @@ export default function EditorScreen() {
     reader.onload = () => {
       const url = String(reader.result);
       setSource(url); setName(file.name); setMsg('');
-      setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setOriginal('');
+      setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setOriginal('');
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const reset = () => { setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMsg('已重置'); };
+  const reset = () => { setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setMsg('已重置'); };
   const setAdjField = (k, v) => setAdj(a => ({ ...a, [k]: v }));
   const setPortraitField = (k, v) => setPortrait(p => ({ ...p, [k]: v }));
+  const setMaskField = (k, v) => setMask(current => ({ ...current, [k]: v }));
 
   const applyPreset = (preset) => {
     if (preset.category === '人像') {
@@ -369,7 +376,7 @@ export default function EditorScreen() {
     if (!source) return;
     setExporting(true); setMsg('');
     try {
-      const dataUrl = await exportEdited(source, { adj, portrait });
+      const dataUrl = await exportEdited(source, { adj, portrait, mask });
       const a = document.createElement('a');
       a.href = dataUrl;
       a.download = (name.replace(/\.[^.]+$/, '') || 'photo') + '_edited.jpg';
@@ -501,6 +508,67 @@ export default function EditorScreen() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
                     {(PS_GROUPS.find(group => group.id === psGroup)?.items || []).map(([key, label]) => (
                       <Slider key={key} label={label} value={adj[key]} onChange={value => setAdjField(key, value)} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {tab === 'mask' && (
+            <div>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {[
+                  ['none', '关闭'],
+                  ['radial', '径向蒙版'],
+                  ['linear', '线性蒙版'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={`grid-chip ${mask.type === value ? 'active' : ''}`}
+                    onClick={() => setMaskField('type', value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {mask.type === 'none' ? (
+                <div className="panel p-4 text-center">
+                  <ScanLine size={22} className="mx-auto text-[var(--text-muted)]" />
+                  <p className="text-[11px] text-[var(--text-soft)] mt-2">选择径向或线性蒙版后，可只调整画面局部。</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-[11px] font-semibold text-[var(--text-muted)]">蒙版范围</p>
+                    <label className="flex items-center gap-2 text-[11px] text-[var(--text-soft)]">
+                      <input type="checkbox" checked={mask.invert} onChange={e => setMaskField('invert', e.target.checked)} />
+                      反向蒙版
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+                    {mask.type === 'radial' && (
+                      <>
+                        <Slider label="中心水平" value={mask.centerX} min={0} max={100} onChange={value => setMaskField('centerX', value)} />
+                        <Slider label="中心垂直" value={mask.centerY} min={0} max={100} onChange={value => setMaskField('centerY', value)} />
+                        <Slider label="范围大小" value={mask.radius} min={5} max={100} onChange={value => setMaskField('radius', value)} />
+                        <Slider label="羽化" value={mask.feather} min={0} max={100} onChange={value => setMaskField('feather', value)} />
+                      </>
+                    )}
+                    {mask.type === 'linear' && (
+                      <>
+                        <Slider label="渐变位置" value={mask.position} min={0} max={100} onChange={value => setMaskField('position', value)} />
+                        <Slider label="渐变角度" value={mask.angle} min={-180} max={180} onChange={value => setMaskField('angle', value)} />
+                        <Slider label="过渡范围" value={mask.feather} min={0} max={100} onChange={value => setMaskField('feather', value)} />
+                      </>
+                    )}
+                  </div>
+                  <div className="divider my-3" />
+                  <p className="text-[11px] font-semibold text-[var(--text-muted)] mb-3">蒙版内调整</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+                    {MASK_ITEMS.map(([key, label]) => (
+                      <Slider key={key} label={label} value={mask[key]} onChange={value => setMaskField(key, value)} />
                     ))}
                   </div>
                 </>

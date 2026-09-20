@@ -16,6 +16,9 @@ export const PTP_PROP = Object.freeze({
   ExposureIndex: 0x500F,
   ExposureBiasCompensation: 0x5010,
   StillCaptureMode: 0x5013,
+  NikonRecordingMedia: 0xD10B,
+  NikonLiveViewSelector: 0xD1A6,
+  NikonApplicationMode: 0xD1F0,
 });
 
 export const EXPOSURE_PROGRAM_CODES = Object.freeze({
@@ -87,6 +90,12 @@ const UINT16_PROPS = new Set([
   PTP_PROP.StillCaptureMode,
 ]);
 
+const UINT8_PROPS = new Set([
+  PTP_PROP.NikonRecordingMedia,
+  PTP_PROP.NikonLiveViewSelector,
+  PTP_PROP.NikonApplicationMode,
+]);
+
 function toUnsigned(value, bits) {
   const max = 2 ** bits;
   return ((Number(value) % max) + max) % max;
@@ -102,6 +111,9 @@ function writeLittleEndian(value, byteLength) {
 export function encodePropValue(propCode, value) {
   if (propCode === PTP_PROP.ExposureBiasCompensation) {
     return writeLittleEndian(Math.round(value), 2);
+  }
+  if (UINT8_PROPS.has(propCode)) {
+    return writeLittleEndian(Math.round(value), 1);
   }
   if (UINT16_PROPS.has(propCode)) {
     return writeLittleEndian(Math.round(value), 2);

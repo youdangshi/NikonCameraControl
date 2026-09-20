@@ -538,32 +538,10 @@ export const camera = {
   async startLiveView() {
     if (demoCam) return demoCam.startLiveView();
     if (mobileSession) {
-      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'device') {
-        const error = new Error('当前是 STA 智能设备传输模式，不能实时取景。请在相机端选择“连接到电脑”，并在 App 中选择“PC 控制”。');
+      if (mobileSessionMode === 'sta') {
+        const error = new Error('Nikon Z30 在 STA 模式下启动实时取景会退出当前网络。实时取景请使用相机 WiFi 热点或 USB Type-C；STA 继续用于照片传输和控制。');
         error.code = 'STA_LIVEVIEW_UNSUPPORTED';
         throw error;
-      }
-      if (mobileSessionMode === 'sta') {
-        try {
-          const setProp = async (propCode, value) => {
-            const resp = await mobileSession.command(
-              OC.SetDevicePropValue,
-              [propCode],
-              6000,
-              encodePropValue(propCode, value),
-            );
-            emit('diagnostic', `PC 控制属性 0x${propCode.toString(16)} 设置响应：0x${Number(resp.responseCode).toString(16)}`);
-            return resp;
-          };
-          await setProp(PTP_PROP.NikonApplicationMode, 1);
-          const mode = await mobileSession.command(OC.NikonChangeApplicationMode, [1], 8000);
-          emit('diagnostic', `PC 控制模式切换响应：0x${Number(mode.responseCode).toString(16)}`);
-          await setProp(PTP_PROP.NikonRecordingMedia, 1);
-          await setProp(PTP_PROP.NikonLiveViewSelector, 0);
-          await new Promise(resolve => setTimeout(resolve, 180));
-        } catch (e) {
-          emit('diagnostic', `PC 控制模式切换未确认：${e.message || e}，继续尝试取景`);
-        }
       }
       const resp = await mobileSession.command(OC.NikonStartLiveView, [], 10000);
       const success = resp.responseCode === 0x2001 || resp.responseCode === 0x201E;
@@ -579,9 +557,6 @@ export const camera = {
     if (demoCam) return demoCam.stopLiveView();
     if (mobileSession) {
       try { await mobileSession.command(OC.NikonEndLiveView, []); } catch {}
-      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'pc') {
-        try { await mobileSession.command(OC.NikonChangeApplicationMode, [0], 5000); } catch {}
-      }
       emit('liveview', { running: false });
       return { success: true };
     }

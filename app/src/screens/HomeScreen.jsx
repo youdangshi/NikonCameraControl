@@ -20,7 +20,7 @@ export default function HomeScreen() {
   const [stats, setStats] = useState({ synced: 0, pending: 0, files: 0, capacity: 0 });
   const connected = state.connectionState === 'session_open';
   const staMode = connected && state.connectionMode === 'sta';
-  const staTransferOnly = staMode && state.connectionProfile === 'device';
+  const staTransferOnly = staMode;
 
   useEffect(() => {
     try {

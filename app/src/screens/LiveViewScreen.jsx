@@ -52,7 +52,7 @@ export default function LiveViewScreen() {
   const frameStatsRef = useRef({ count: 0, startedAt: performance.now() });
   const mountedRef = useRef(true);
   const connected = state.connectionState === 'session_open';
-  const staTransferOnly = state.connectionMode === 'sta' && state.connectionProfile === 'device';
+  const staTransferOnly = state.connectionMode === 'sta';
 
   useEffect(() => {
     const unsubscribe = camera.on('captured', data => {
@@ -101,7 +101,7 @@ export default function LiveViewScreen() {
     if (lvRunningRef.current || lvStartingRef.current) return;
     if (staTransferOnly) {
       setLvOn(false);
-      setLvError('当前是 STA 智能设备传输模式。请在相机端选择“连接到电脑”，并在妮妮的相机连接页选择“PC 控制”后重新连接。');
+      setLvError('Nikon Z30 在 STA 模式下启动实时取景会退出当前网络。请改用相机 WiFi 热点或 USB Type-C。STA 可继续用于照片传输和控制。');
       return;
     }
     lvStartingRef.current = true;

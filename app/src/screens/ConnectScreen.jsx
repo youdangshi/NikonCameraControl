@@ -163,7 +163,7 @@ export default function ConnectScreen() {
           </button>
           <div className="mt-3 p-3 rounded-lg bg-emerald-500/8 border border-emerald-500/15 text-[11px] text-emerald-300/80 space-y-1">
             <p><strong>使用提示：</strong></p>
-            <p>相机开机，USB 模式设为 <strong>MTP/PTP</strong>；Windows 需用 <strong>Zadig</strong> 把驱动换成 WinUSB。</p>
+            <p>相机开机，USB 模式设为 <strong>MTP/PTP（媒体传输协议）</strong>；Windows 需用 <strong>Zadig（驱动工具）</strong> 把驱动换成 WinUSB（通用 USB 驱动）。</p>
           </div>
         </div>
 

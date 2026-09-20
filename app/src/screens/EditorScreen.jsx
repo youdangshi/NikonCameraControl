@@ -5,11 +5,15 @@ import {
   DEFAULT_ADJ, DEFAULT_PORTRAIT,
 } from '../editor/presets.js';
 import { renderPreview, exportEdited, loadImage } from '../editor/imageEngine.js';
-import { ArrowLeft, BookOpen, Check, Download, ImageOff, RotateCcw, SlidersHorizontal, Sparkles, UserRound } from 'lucide-react';
+import {
+  ArrowLeft, BookOpen, Check, Download, ImageOff, Palette, RotateCcw,
+  SlidersHorizontal, Sparkles, UserRound,
+} from 'lucide-react';
 
 const TABS = [
   { id: 'portrait', label: '一键人像', Icon: UserRound },
   { id: 'basic', label: '基础调色', Icon: SlidersHorizontal },
+  { id: 'ps', label: '专业修图（PS）', Icon: Palette },
   { id: 'presets', label: '风格预设', Icon: Sparkles },
   { id: 'guide', label: '修图指南', Icon: BookOpen },
 ];
@@ -25,6 +29,54 @@ const PORTRAIT_ITEMS = [
   ['smooth', '磨皮'], ['whiten', '美白'], ['rosy', '红润'], ['skinBrighten', '肤色提亮'],
   ['blemish', '瑕疵修复'], ['teethWhite', '牙齿美白'], ['lipColor', '唇色'], ['eyeLarge', '大眼'],
   ['faceSlim', '瘦脸'],
+];
+
+const PS_GROUPS = [
+  {
+    id: 'light',
+    label: '光影',
+    title: '光影',
+    items: [
+      ['exposure', '曝光'], ['contrast', '对比度'], ['highlights', '高光'], ['shadows', '阴影'],
+      ['whites', '白色'], ['blacks', '黑色'],
+    ],
+  },
+  {
+    id: 'color',
+    label: '颜色',
+    title: '颜色',
+    items: [
+      ['temperature', '色温'], ['tint', '色调'], ['vibrance', '自然饱和'], ['saturation', '饱和度'],
+    ],
+  },
+  {
+    id: 'effects',
+    label: '效果',
+    title: '细节与效果',
+    items: [
+      ['clarity', '清晰度'], ['texture', '纹理'], ['dehaze', '去雾'], ['sharpen', '锐化'],
+      ['denoise', '降噪'], ['vignette', '暗角'], ['grain', '颗粒'], ['fade', '褪色'],
+    ],
+  },
+  {
+    id: 'curve',
+    label: '曲线',
+    title: '五点曲线',
+    items: [
+      ['toneBlack', '黑色'], ['toneShadow', '阴影'], ['toneMid', '中间调'],
+      ['toneHighlight', '高光'], ['toneWhite', '白色'],
+    ],
+  },
+  { id: 'mix', label: '混色', title: '颜色混合', items: [] },
+];
+
+const COLOR_MIX_ITEMS = [
+  ['red', '红色', '#ef4444'],
+  ['orange', '橙色', '#f97316'],
+  ['yellow', '黄色', '#eab308'],
+  ['green', '绿色', '#22c55e'],
+  ['blue', '蓝色', '#3b82f6'],
+  ['purple', '紫色', '#a855f7'],
 ];
 
 function Slider({ label, value = 0, onChange, min = -100, max = 100, step = 1, accent = '#3b82f6' }) {
@@ -45,6 +97,148 @@ function Slider({ label, value = 0, onChange, min = -100, max = 100, step = 1, a
   );
 }
 
+function ColorMixer({ adj, onChange }) {
+  const [color, setColor] = useState('red');
+  const current = COLOR_MIX_ITEMS.find(item => item[0] === color) || COLOR_MIX_ITEMS[0];
+  return (
+    <div>
+      <div className="grid grid-cols-6 gap-2 mb-4">
+        {COLOR_MIX_ITEMS.map(([key, label, swatch]) => (
+          <button
+            key={key}
+            type="button"
+            className={`rounded-md border px-1 py-2 ${color === key ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--surface)]'}`}
+            onClick={() => setColor(key)}
+          >
+            <span className="mx-auto block w-4 h-4 rounded-full border border-white/20" style={{ background: swatch }} />
+            <span className="block text-[9px] text-center mt-1">{label}</span>
+          </button>
+        ))}
+      </div>
+      <Slider label={`${current[1]} · 色相`} value={adj[`${color}Hue`]} onChange={value => onChange(`${color}Hue`, value)} accent={current[2]} />
+      <Slider label={`${current[1]} · 饱和度`} value={adj[`${color}Sat`]} onChange={value => onChange(`${color}Sat`, value)} accent={current[2]} />
+      <Slider label={`${current[1]} · 明度`} value={adj[`${color}Lum`]} onChange={value => onChange(`${color}Lum`, value)} accent={current[2]} />
+    </div>
+  );
+}
+
+const HISTOGRAM_BINS = 128;
+
+function histogramPath(bins, width = 128, height = 52, fill = false) {
+  if (!bins?.length) return '';
+  const max = Math.max(1, ...bins);
+  const points = bins.map((value, index) => {
+    const x = (index / (bins.length - 1)) * width;
+    const y = height - (value / max) * (height - 4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const line = `M ${points.join(' L ')}`;
+  return fill ? `${line} L ${width},${height} L 0,${height} Z` : line;
+}
+
+function HistogramChart({ histogram, compact = false }) {
+  return (
+    <div className={`rounded-md border border-white/10 bg-black/70 overflow-hidden ${compact ? 'w-[126px] p-1.5' : 'p-2'}`}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[9px] text-white/55">直方图</span>
+        <span className="text-[8px] text-white/35">RGB 通道</span>
+      </div>
+      <svg viewBox="0 0 128 52" className={compact ? 'w-full h-[48px]' : 'w-full h-[72px]'} preserveAspectRatio="none">
+        <path d={histogramPath(histogram?.lum)} fill="rgba(255,255,255,.12)" />
+        <path d={histogramPath(histogram?.r)} fill="none" stroke="rgba(255,90,90,.82)" strokeWidth="1.1" vectorEffect="non-scaling-stroke" />
+        <path d={histogramPath(histogram?.g)} fill="none" stroke="rgba(75,222,128,.82)" strokeWidth="1.1" vectorEffect="non-scaling-stroke" />
+        <path d={histogramPath(histogram?.b)} fill="none" stroke="rgba(85,145,255,.9)" strokeWidth="1.1" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </div>
+  );
+}
+
+const CURVE_POINTS = [
+  ['toneBlack', 0],
+  ['toneShadow', 1],
+  ['toneMid', 2],
+  ['toneHighlight', 3],
+  ['toneWhite', 4],
+];
+
+function CurveEditor({ adj, histogram, onChange }) {
+  const [dragging, setDragging] = useState(null);
+  const width = 320;
+  const height = 178;
+  const pad = 18;
+  const coordinates = CURVE_POINTS.map(([key], index) => {
+    const x = pad + index * ((width - pad * 2) / (CURVE_POINTS.length - 1));
+    const y = pad + (1 - (clampValue(adj[key]) + 100) / 200) * (height - pad * 2);
+    return { key, x, y };
+  });
+
+  const updatePoint = (event, index) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const localY = (event.clientY - rect.top) * (height / rect.height);
+    const t = clampValue(1 - (localY - pad) / (height - pad * 2));
+    onChange(CURVE_POINTS[index][0], Math.round((t * 2 - 1) * 100));
+  };
+
+  const linePath = coordinates.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+
+  return (
+    <div className="mb-4 rounded-md border border-[var(--line)] bg-[#0b0e11] p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <p className="text-xs font-semibold">曲线</p>
+          <p className="text-[9px] text-[var(--text-muted)] mt-0.5">拖动五个控制点调整黑场到白场</p>
+        </div>
+        <HistogramChart histogram={histogram} compact />
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full touch-none select-none"
+        onPointerMove={event => dragging != null && updatePoint(event, dragging)}
+        onPointerUp={() => setDragging(null)}
+        onPointerLeave={() => setDragging(null)}
+      >
+        {[1, 2, 3, 4].map(i => (
+          <line key={`v${i}`} x1={(width / 5) * i} y1={pad} x2={(width / 5) * i} y2={height - pad} stroke="rgba(255,255,255,.06)" />
+        ))}
+        {[1, 2, 3, 4].map(i => (
+          <line key={`h${i}`} x1={pad} y1={(height / 5) * i} x2={width - pad} y2={(height / 5) * i} stroke="rgba(255,255,255,.06)" />
+        ))}
+        <line x1={pad} y1={height - pad} x2={width - pad} y2={pad} stroke="rgba(255,255,255,.12)" strokeDasharray="4 5" />
+        <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth="2.2" />
+        {coordinates.map((point, index) => (
+          <circle
+            key={point.key}
+            cx={point.x}
+            cy={point.y}
+            r={dragging === index ? 8 : 6}
+            fill="var(--accent)"
+            stroke="#0b0e11"
+            strokeWidth="2"
+            className="cursor-ns-resize"
+            onPointerDown={event => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+              setDragging(index);
+            }}
+          />
+        ))}
+      </svg>
+      <div className="grid grid-cols-5 gap-1 text-center mt-2">
+        {CURVE_POINTS.map(([key, index]) => (
+          <div key={key}>
+            <p className="text-[9px] text-[var(--text-muted)]">{PS_GROUPS[3].items[index][1]}</p>
+            <p className="mono text-[10px] mt-0.5">{adj[key] > 0 ? '+' : ''}{adj[key]}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function clampValue(value) {
+  return Math.max(-100, Math.min(100, Number(value) || 0));
+}
+
 export default function EditorScreen() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -53,11 +247,13 @@ export default function EditorScreen() {
   const [source, setSource] = useState(stateSrc || '');
   const [name, setName] = useState(stateName);
   const [tab, setTab] = useState('portrait');
+  const [psGroup, setPsGroup] = useState('light');
   const [quickStrength, setQuickStrength] = useState(70);
   const [adj, setAdj] = useState({ ...DEFAULT_ADJ });
   const [portrait, setPortrait] = useState({ ...DEFAULT_PORTRAIT });
   const [preview, setPreview] = useState('');
   const [original, setOriginal] = useState('');
+  const [histogram, setHistogram] = useState(null);
   const [rendering, setRendering] = useState(false);
   const [compare, setCompare] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -83,6 +279,32 @@ export default function EditorScreen() {
       }).catch(() => setOriginal(source));
     }
   }, [source, original]);
+
+  useEffect(() => {
+    if (!preview) return undefined;
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = Math.max(1, Math.round(256 * (img.naturalHeight || 1) / (img.naturalWidth || 1)));
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const data = ctx.getImageData(0, 0, c.width, c.height).data;
+      const bins = { r: new Array(HISTOGRAM_BINS).fill(0), g: new Array(HISTOGRAM_BINS).fill(0), b: new Array(HISTOGRAM_BINS).fill(0), lum: new Array(HISTOGRAM_BINS).fill(0) };
+      for (let i = 0; i < data.length; i += 4) {
+        bins.r[Math.min(HISTOGRAM_BINS - 1, Math.floor(data[i] / 2))] += 1;
+        bins.g[Math.min(HISTOGRAM_BINS - 1, Math.floor(data[i + 1] / 2))] += 1;
+        bins.b[Math.min(HISTOGRAM_BINS - 1, Math.floor(data[i + 2] / 2))] += 1;
+        const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        bins.lum[Math.min(HISTOGRAM_BINS - 1, Math.floor(lum / 2))] += 1;
+      }
+      setHistogram(bins);
+    };
+    img.src = preview;
+    return () => { cancelled = true; img.onload = null; };
+  }, [preview]);
 
   useEffect(() => {
     if (!source) return;
@@ -214,6 +436,11 @@ export default function EditorScreen() {
             />
             {compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/70 border border-white/10 text-[10px]">原图</span>}
             {!compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/70 border border-white/10 text-[10px]">效果预览</span>}
+            {histogram && (
+              <div className="absolute top-3 right-3 z-10">
+                <HistogramChart histogram={histogram} compact />
+              </div>
+            )}
             {rendering && <span className="absolute bottom-3 right-3 mono text-[10px] text-[var(--accent)]">处理中</span>}
           </div>
         )}
@@ -239,6 +466,45 @@ export default function EditorScreen() {
               {BASIC_ITEMS.map(([k, label]) => (
                 <Slider key={k} label={label} value={adj[k]} onChange={v => setAdjField(k, v)} />
               ))}
+            </div>
+          )}
+
+          {tab === 'ps' && (
+            <div>
+              <div className="flex gap-2 overflow-x-auto pb-3">
+                {PS_GROUPS.map(group => (
+                  <button
+                    key={group.id}
+                    className={`grid-chip ${psGroup === group.id ? 'active' : ''}`}
+                    onClick={() => setPsGroup(group.id)}
+                  >
+                    {group.label}
+                  </button>
+                ))}
+              </div>
+              {psGroup === 'curve' ? (
+                <>
+                  <CurveEditor adj={adj} histogram={histogram} onChange={setAdjField} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+                    {(PS_GROUPS.find(group => group.id === 'curve')?.items || []).map(([key, label]) => (
+                      <Slider key={key} label={label} value={adj[key]} onChange={value => setAdjField(key, value)} />
+                    ))}
+                  </div>
+                </>
+              ) : psGroup === 'mix' ? (
+                <ColorMixer adj={adj} onChange={setAdjField} />
+              ) : (
+                <>
+                  <p className="text-[11px] font-semibold text-[var(--text-muted)] mb-3">
+                    {PS_GROUPS.find(group => group.id === psGroup)?.title}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+                    {(PS_GROUPS.find(group => group.id === psGroup)?.items || []).map(([key, label]) => (
+                      <Slider key={key} label={label} value={adj[key]} onChange={value => setAdjField(key, value)} />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 

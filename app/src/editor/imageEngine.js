@@ -2,7 +2,8 @@
  * 画布修图引擎
  *
  * 在浏览器/手机端用 <canvas> 完成「调色 + 人像精修」，不依赖远程模型：
- *   - 基础调色：曝光/对比/高光/阴影/白/黑/色温/色调/饱和/自然饱和/清晰/锐化/暗角/颗粒/褪色
+ *   - 基础调色：曝光/对比/高光/阴影/白/黑/色温/色调/饱和/自然饱和/清晰/纹理/去雾/降噪/锐化/暗角/颗粒/褪色
+ *   - 专业基础：五点曲线、红橙黄绿蓝紫颜色混合
  *   - 人像精修：磨皮/美白/红润/肤色提亮/瑕疵/牙齿/唇色 +（演示近似）大眼/瘦脸
  *   - stylePreset 可直接套用 STYLE_PRESETS 里的预设
  *
@@ -96,6 +97,9 @@ export function renderEdited(img, { adj = {}, portrait = {} } = {}, maxDim = 110
 
   const imageData = ctx.getImageData(0, 0, w, h);
   basicAdjust(imageData, A);
+  applyToneCurve(imageData, A);
+  applyColorMixer(imageData, A);
+  applyDenoise(imageData, A);
   applyPortrait(imageData, A, P, canvas, w, h);
   ctx.putImageData(imageData, 0, 0);
 
@@ -119,6 +123,7 @@ function basicAdjust(data, A) {
   const wh = num(A.whites), bl = num(A.blacks);
   const vib = num(A.vibrance) / 100;
   const fade = num(A.fade);
+  const dehaze = num(A.dehaze) / 100;
 
   for (let i = 0; i < n; i += 4) {
     let r = d[i], g = d[i + 1], b = d[i + 2];
@@ -133,6 +138,14 @@ function basicAdjust(data, A) {
     r = (r - 128) * contrast + 128;
     g = (g - 128) * contrast + 128;
     b = (b - 128) * contrast + 128;
+
+    // 去雾：轻微增强中低对比区域，并压低远景常见的蓝灰雾
+    if (dehaze) {
+      const dContrast = 1 + dehaze * 0.55;
+      r = (r - 128) * dContrast + 128;
+      g = (g - 128) * dContrast + 128;
+      b = (b - 128) * dContrast + 128 - dehaze * 8;
+    }
 
     // 饱和度
     const lum = r * 0.299 + g * 0.587 + b * 0.114;
@@ -171,22 +184,23 @@ function basicAdjust(data, A) {
   }
 
   // 锐化 / 清晰度做局部对比（unsharp mask）
-  if (num(A.sharpen) !== 0 || num(A.clarity) !== 0) {
-    applyUnsharp(data, num(A.sharpen), num(A.clarity));
+  if (num(A.sharpen) !== 0 || num(A.clarity) !== 0 || num(A.texture) !== 0) {
+    applyUnsharp(data, num(A.sharpen), num(A.clarity), num(A.texture));
   }
 }
 
 /**
  * unsharp mask：锐化 = 原图 - 模糊；清晰度 = 增加局部对比（同样用 unsharp，但加权不同）。
  */
-function applyUnsharp(data, sharpen, clarity) {
+function applyUnsharp(data, sharpen, clarity, texture = 0) {
   // 只对已 putImageData 前做，read back 一次
   // 这里直接对传入 data 做轻卷积（3x3 拉普拉斯）
   const w = data.width, h = data.height;
   const src = new Uint8ClampedArray(data.data);
   const strong = clamp(sharpen / 100, -1, 1);
   const clear = clamp(clarity / 100, -1, 1);
-  const amount = strong * 0.7 + clear * 0.9;
+  const tex = clamp(texture / 100, -1, 1);
+  const amount = strong * 0.7 + clear * 0.9 + tex * 0.65;
   if (Math.abs(amount) < 0.001) return;
 
   const p = src;
@@ -200,6 +214,134 @@ function applyUnsharp(data, sharpen, clarity) {
         const idx = i + c;
         const lap = 4 * p[idx] - p[l + c] - p[r + c] - p[u + c] - p[d + c];
         out[idx] = clamp(p[idx] + amount * lap * 0.35, 0, 255);
+      }
+    }
+  }
+}
+
+function applyToneCurve(imageData, A) {
+  const black = num(A.toneBlack), shadow = num(A.toneShadow), mid = num(A.toneMid);
+  const highlight = num(A.toneHighlight), white = num(A.toneWhite);
+  if (!black && !shadow && !mid && !highlight && !white) return;
+
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    const wb = clamp((45 - lum) / 45, 0, 1);
+    const ws = clamp(1 - Math.abs(lum - 85) / 55, 0, 1);
+    const wm = clamp(1 - Math.abs(lum - 142) / 64, 0, 1);
+    const wh = clamp(1 - Math.abs(lum - 198) / 55, 0, 1);
+    const ww = clamp((lum - 215) / 40, 0, 1);
+    const delta = wb * black * 0.45 + ws * shadow * 0.55 + wm * mid * 0.45 + wh * highlight * 0.55 + ww * white * 0.5;
+    d[i] = clamp(d[i] + delta, 0, 255);
+    d[i + 1] = clamp(d[i + 1] + delta, 0, 255);
+    d[i + 2] = clamp(d[i + 2] + delta, 0, 255);
+  }
+}
+
+const COLOR_MIX_ANCHORS = [
+  ['red', 0], ['orange', 32], ['yellow', 60], ['green', 120], ['blue', 220], ['purple', 285],
+];
+
+function hueDistance(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const delta = max - min;
+  const s = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / delta + (g < b ? 6 : 0)) * 60;
+  else if (max === g) h = ((b - r) / delta + 2) * 60;
+  else h = ((r - g) / delta + 4) * 60;
+  return [h, s, l];
+}
+
+function hueToRgb(p, q, t) {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360 / 360;
+  if (s === 0) {
+    const gray = l * 255;
+    return [gray, gray, gray];
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [
+    hueToRgb(p, q, h + 1 / 3) * 255,
+    hueToRgb(p, q, h) * 255,
+    hueToRgb(p, q, h - 1 / 3) * 255,
+  ];
+}
+
+function applyColorMixer(imageData, A) {
+  const active = COLOR_MIX_ANCHORS.some(([key]) =>
+    num(A[`${key}Hue`]) || num(A[`${key}Sat`]) || num(A[`${key}Lum`])
+  );
+  if (!active) return;
+
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const [h, s, l] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
+    if (s < 0.04) continue;
+    let hueShift = 0;
+    let satScale = 1;
+    let lightShift = 0;
+    for (const [key, anchor] of COLOR_MIX_ANCHORS) {
+      const dist = hueDistance(h, anchor);
+      const weight = clamp(1 - dist / 58, 0, 1);
+      if (!weight) continue;
+      hueShift += weight * (num(A[`${key}Hue`]) / 100) * 42;
+      satScale += weight * (num(A[`${key}Sat`]) / 100) * 0.9;
+      lightShift += weight * (num(A[`${key}Lum`]) / 100) * 0.34;
+    }
+    const [r, g, b] = hslToRgb(h + hueShift, clamp(s * satScale, 0, 1), clamp(l + lightShift, 0, 1));
+    d[i] = clamp(r, 0, 255);
+    d[i + 1] = clamp(g, 0, 255);
+    d[i + 2] = clamp(b, 0, 255);
+  }
+}
+
+function applyDenoise(imageData, A) {
+  const strength = clamp(num(A.denoise) / 100, 0, 1);
+  if (strength <= 0.001) return;
+  const w = imageData.width, h = imageData.height;
+  const src = new Uint8ClampedArray(imageData.data);
+  const out = imageData.data;
+  const amount = strength * 0.62;
+
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = (y * w + x) * 4;
+      const neighbors = [
+        ((y - 1) * w + x) * 4,
+        ((y + 1) * w + x) * 4,
+        (y * w + x - 1) * 4,
+        (y * w + x + 1) * 4,
+      ];
+      for (let c = 0; c < 3; c++) {
+        const center = src[i + c];
+        let sum = 0, weight = 0;
+        for (const ni of neighbors) {
+          const diff = Math.abs(center - src[ni + c]);
+          const edgeWeight = clamp(1 - diff / 52, 0.12, 1);
+          sum += src[ni + c] * edgeWeight;
+          weight += edgeWeight;
+        }
+        const avg = weight ? sum / weight : center;
+        out[i + c] = center * (1 - amount) + avg * amount;
       }
     }
   }

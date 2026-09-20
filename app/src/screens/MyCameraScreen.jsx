@@ -210,7 +210,7 @@ export default function MyCameraScreen() {
       <div className="page-inner space-y-4">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="section-label">CAMERA LINK</p>
+            <p className="section-label">相机连接</p>
             <h1 className="text-xl font-bold mt-1">相机连接</h1>
           </div>
           <button className="btn-icon" onClick={() => navigate('/settings')} aria-label="设置"><Settings2 size={17} /></button>
@@ -226,7 +226,7 @@ export default function MyCameraScreen() {
         <section className="panel">
           <div className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
             <div>
-              <p className="section-label">LIVE STATUS</p>
+              <p className="section-label">实时状态</p>
               <p className="section-title mt-1">连接状态</p>
             </div>
             <span className={`badge ${connected ? 'badge-green' : 'badge-yellow'}`}>
@@ -245,7 +245,7 @@ export default function MyCameraScreen() {
         <section className="panel">
           <div className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
             <div>
-              <p className="section-label">HISTORY</p>
+              <p className="section-label">连接记录</p>
               <p className="section-title mt-1">最近连接</p>
             </div>
           </div>
@@ -261,7 +261,7 @@ export default function MyCameraScreen() {
 
         <section className="panel">
           <div className="px-4 py-3 border-b border-[var(--line)]">
-            <p className="section-label">METHOD</p>
+            <p className="section-label">连接方式</p>
             <p className="section-title mt-1">连接方式</p>
           </div>
           <div className="p-3 grid grid-cols-2 gap-2">
@@ -339,7 +339,7 @@ export default function MyCameraScreen() {
           <section className="panel">
             <div className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
               <div>
-                <p className="section-label">USB HOST</p>
+                <p className="section-label">USB 主机</p>
                 <p className="section-title mt-1">设备诊断</p>
               </div>
               <button className="btn btn-secondary" onClick={detectUsb}><RefreshCw size={14} /> 检测</button>

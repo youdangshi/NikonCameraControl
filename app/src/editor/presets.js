@@ -238,7 +238,15 @@ export const PRESET_TO_GENRE = {
 export const DEFAULT_ADJ = {
   exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0,
   temperature: 0, tint: 0, saturation: 0, vibrance: 0, clarity: 0,
+  texture: 0, dehaze: 0, denoise: 0,
   sharpen: 0, vignette: 0, grain: 0, fade: 0,
+  toneBlack: 0, toneShadow: 0, toneMid: 0, toneHighlight: 0, toneWhite: 0,
+  redHue: 0, redSat: 0, redLum: 0,
+  orangeHue: 0, orangeSat: 0, orangeLum: 0,
+  yellowHue: 0, yellowSat: 0, yellowLum: 0,
+  greenHue: 0, greenSat: 0, greenLum: 0,
+  blueHue: 0, blueSat: 0, blueLum: 0,
+  purpleHue: 0, purpleSat: 0, purpleLum: 0,
 };
 
 export const DEFAULT_PORTRAIT = {

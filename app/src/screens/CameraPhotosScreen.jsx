@@ -75,7 +75,7 @@ export default function CameraPhotosScreen() {
       <div className="page-inner space-y-4 pb-24">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="section-label">CAMERA MEDIA</p>
+            <p className="section-label">相机媒体</p>
             <h1 className="text-xl font-bold mt-1">相机存储卡</h1>
           </div>
           <button className="btn-icon" onClick={load} disabled={!connected || loading} aria-label="刷新">

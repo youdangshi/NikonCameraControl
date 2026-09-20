@@ -12,7 +12,7 @@ export default function SyncScreen() {
     <div className="page">
       <div className="page-inner space-y-4">
         <div>
-          <p className="section-label">TRANSFER QUEUE</p>
+          <p className="section-label">传输队列</p>
           <h1 className="text-xl font-bold mt-1">同步任务</h1>
         </div>
 
@@ -48,7 +48,7 @@ export default function SyncScreen() {
 
         <section className="panel">
           <div className="px-4 py-3 border-b border-[var(--line)]">
-            <p className="section-label">PREFERENCES</p>
+            <p className="section-label">偏好设置</p>
             <p className="section-title mt-1">传输规则</p>
           </div>
           <div className="divide-y divide-[var(--line)]">

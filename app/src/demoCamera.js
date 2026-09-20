@@ -92,7 +92,7 @@ export function createDemoCamera() {
     ctx.fillStyle = '#fff'; ctx.font = '14px monospace';
     ctx.fillText(`ISO ${state.iso}  ${state.shutter}  ${state.aperture}  EV${state.ev>=0?'+':''}${state.ev}  ${state.wb}`, 12, h - 20);
     ctx.fillStyle = 'rgba(120,220,120,0.9)';
-    ctx.fillText(state.liveView ? '● LIVE 实时取景' : '○ STANDBY', w - 150, h - 20);
+    ctx.fillText(state.liveView ? '● 实时取景' : '○ 待机', w - 150, h - 20);
     ctx.restore && ctx.restore();
     return canvas.toDataURL('image/jpeg', 0.82);
   }

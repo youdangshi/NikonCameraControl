@@ -312,11 +312,11 @@ export default function LiveViewScreen() {
             <span className="text-[10px] text-white/45">Z30</span>
             <div className="ml-auto flex items-end gap-4">
               <div className="text-right leading-none">
-                <div className="mono text-base font-semibold">{fps || '--'}<span className="text-[9px] ml-1">FPS</span></div>
+                <div className="mono text-base font-semibold">{fps || '--'}<span className="text-[9px] ml-1">帧/秒</span></div>
                 <div className="text-[9px] text-white/45 mt-1">实时</div>
               </div>
               <div className="text-right leading-none">
-                <div className={`text-[12px] font-bold ${lvOn ? 'text-[var(--green)]' : 'text-white/35'}`}>LIVE</div>
+                <div className={`text-[12px] font-bold ${lvOn ? 'text-[var(--green)]' : 'text-white/35'}`}>实时</div>
                 <div className="text-[9px] text-white/45 mt-1">{lvOn ? '取景中' : '待机'}</div>
               </div>
             </div>

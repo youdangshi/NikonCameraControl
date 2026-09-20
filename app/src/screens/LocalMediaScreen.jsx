@@ -50,7 +50,7 @@ export default function LocalMediaScreen() {
       <div className="page-inner space-y-4 pb-24">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="section-label">LOCAL LIBRARY</p>
+            <p className="section-label">本地摄影库</p>
             <h1 className="text-xl font-bold mt-1">本地照片</h1>
           </div>
           <button className="btn btn-primary" onClick={() => inputRef.current?.click()}><ImagePlus size={15} /> 导入</button>
@@ -82,7 +82,7 @@ export default function LocalMediaScreen() {
           <section className="panel">
             <div className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
               <div>
-                <p className="section-label">LIBRARY</p>
+                <p className="section-label">本地图库</p>
                 <p className="section-title mt-1">{items.length} 个本地项目</p>
               </div>
               <button className="btn-icon" onClick={() => { setItems([]); setSelected(null); setResult(null); }} aria-label="清空"><Trash2 size={16} /></button>

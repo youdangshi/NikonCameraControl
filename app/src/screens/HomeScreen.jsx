@@ -36,7 +36,7 @@ export default function HomeScreen() {
       <div className="page-inner space-y-4">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="section-label">NIKON REMOTE</p>
+            <p className="section-label">尼康遥控</p>
             <h1 className="text-xl font-bold mt-1">拍摄控制台</h1>
           </div>
           <span className={`badge ${connected ? 'badge-green' : 'badge-yellow'}`}>
@@ -85,7 +85,7 @@ export default function HomeScreen() {
         <section className="panel">
           <div className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
             <div>
-              <p className="section-label">TRANSFER</p>
+              <p className="section-label">传输同步</p>
               <p className="section-title mt-1">同步概况</p>
             </div>
             <button className="text-[11px] text-[var(--text-soft)] flex items-center" onClick={() => navigate('/sync')}>
@@ -110,7 +110,7 @@ export default function HomeScreen() {
 
         <section className="panel">
           <div className="px-4 py-3 border-b border-[var(--line)]">
-            <p className="section-label">CONNECTION</p>
+            <p className="section-label">连接方式</p>
             <p className="section-title mt-1">连接方式</p>
           </div>
           <div className="divide-y divide-[var(--line)]">

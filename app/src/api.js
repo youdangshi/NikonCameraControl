@@ -543,7 +543,7 @@ export const camera = {
         error.code = 'STA_LIVEVIEW_UNSUPPORTED';
         throw error;
       }
-      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'pc') {
+      if (mobileSessionMode === 'sta') {
         try {
           const setProp = async (propCode, value) => {
             const resp = await mobileSession.command(

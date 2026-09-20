@@ -52,6 +52,7 @@ export default function LiveViewScreen() {
   const frameStatsRef = useRef({ count: 0, startedAt: performance.now() });
   const mountedRef = useRef(true);
   const connected = state.connectionState === 'session_open';
+  const staTransferOnly = state.connectionMode === 'sta' && state.connectionProfile === 'device';
 
   useEffect(() => {
     const unsubscribe = camera.on('captured', data => {
@@ -98,6 +99,11 @@ export default function LiveViewScreen() {
 
   const startLV = async () => {
     if (lvRunningRef.current || lvStartingRef.current) return;
+    if (staTransferOnly) {
+      setLvOn(false);
+      setLvError('当前是 STA 智能设备传输模式。请在相机端选择“连接到电脑”，并在妮妮的相机连接页选择“PC 控制”后重新连接。');
+      return;
+    }
     lvStartingRef.current = true;
     setLvError('');
     try {
@@ -173,6 +179,10 @@ export default function LiveViewScreen() {
 
   const doCapture = async () => {
     if (!connected || capturing) return;
+    if (staTransferOnly) {
+      setLvError('当前是 STA 智能设备传输模式，不能遥控拍照。请在相机端选择“连接到电脑”，并重新连接“PC 控制”。');
+      return;
+    }
     setCapturing(true);
     setLvError('');
     try {
@@ -198,6 +208,7 @@ export default function LiveViewScreen() {
 
   const doAF = async () => {
     if (!connected) return;
+    if (staTransferOnly) return;
     try {
       await camera.autoFocus();
       setLvError('');
@@ -208,6 +219,7 @@ export default function LiveViewScreen() {
 
   const handleTap = async (event) => {
     if (event.target.closest('button') || panelOpen || posePanelOpen || guidePanelOpen) return;
+    if (staTransferOnly) return;
     const host = lvRef.current;
     if (!host) return;
     const rect = host.getBoundingClientRect();
@@ -274,10 +286,11 @@ export default function LiveViewScreen() {
                 <button className="btn btn-primary mt-5" onClick={() => navigate('/camera')}>前往连接</button>
               </div>
             ) : (
-              <div className="text-center">
+              <div className="text-center px-8 max-w-md">
                 <Aperture size={40} className="mx-auto text-white/30 animate-spin" strokeWidth={1.2} />
-                <p className="text-sm text-white/65 mt-4">{lvError ? '取景未启动' : '正在启动实时取景'}</p>
-                {lvError && <button className="btn btn-primary mt-5" onClick={startLV}>重新启动</button>}
+                <p className="text-sm text-white/65 mt-4">{lvError ? '当前连接不支持实时取景' : '正在启动实时取景'}</p>
+                {lvError && <p className="text-[11px] leading-5 text-amber-200/85 mt-3">{lvError}</p>}
+                {lvError && <button className="btn btn-secondary mt-5" onClick={() => navigate('/camera')}>切换连接方式</button>}
               </div>
             )}
           </div>
@@ -369,15 +382,17 @@ export default function LiveViewScreen() {
         <SlidersHorizontal size={14} className="text-white/55 flex-shrink-0" />
       </button>
 
-      <div className={`absolute left-0 right-0 bottom-[98px] z-40 border-t border-white/10 bg-[#0d1012]/98 ${panelOpen ? '' : 'hidden'}`} style={{ maxHeight: '62vh' }}>
-        <div className="flex items-center justify-between px-4 py-2 border-b border-white/8">
-          <span className="text-[11px] font-semibold text-white/80">相机参数 · 实时生效</span>
-          <button className="btn-icon w-8 h-8" onClick={() => setPanelOpen(false)} aria-label="收起参数">×</button>
+      {panelOpen && (
+        <div className="absolute left-0 right-0 bottom-[98px] z-40 border-t border-white/10 bg-[#0d1012]/98" style={{ maxHeight: '62vh' }}>
+          <div className="flex items-center justify-between px-4 py-2 border-b border-white/8">
+            <span className="text-[11px] font-semibold text-white/80">相机参数 · 实时生效</span>
+            <button className="btn-icon w-8 h-8" onClick={() => setPanelOpen(false)} aria-label="收起参数">×</button>
+          </div>
+          <div className="overflow-auto" style={{ maxHeight: 'calc(62vh - 42px)' }}>
+            <CameraControlPanel compact onStateChange={setQuick} />
+          </div>
         </div>
-        <div className="overflow-auto" style={{ maxHeight: 'calc(62vh - 42px)' }}>
-          <CameraControlPanel compact onStateChange={setQuick} />
-        </div>
-      </div>
+      )}
 
       {guidePanelOpen && (
         <div className="absolute left-3 right-3 bottom-[102px] z-50 rounded-md border border-white/15 bg-[#111417]/98 p-3 shadow-2xl">
@@ -422,7 +437,7 @@ export default function LiveViewScreen() {
             className="absolute left-1/2 -translate-x-1/2 w-[74px] h-[74px] rounded-full flex items-center justify-center active:scale-95 transition-transform disabled:opacity-40"
             style={{ border: '4px solid rgba(255,255,255,.92)', background: 'rgba(0,0,0,.22)' }}
             onClick={doCapture}
-            disabled={!connected || capturing}
+            disabled={!connected || capturing || staTransferOnly}
             aria-label="拍照"
           >
             <span className="w-[56px] h-[56px] rounded-full bg-white block" style={{ transform: capturing ? 'scale(.78)' : 'scale(1)', transition: 'transform .12s' }} />

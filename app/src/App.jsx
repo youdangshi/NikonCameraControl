@@ -61,7 +61,7 @@ class AppErrorBoundary extends React.Component {
 
 export const AppContext = createContext({
   state: {
-    connectionState: 'disconnected', connectedCamera: null, connectionMode: null,
+    connectionState: 'disconnected', connectedCamera: null, connectionMode: null, connectionProfile: null,
     aiApiKey: '', poseGuides: DEFAULT_POSE_GUIDES, aiSettings: DEFAULT_AI_SETTINGS,
   },
   updateState: () => {},
@@ -71,7 +71,7 @@ export const AppContext = createContext({
 
 export default function App() {
   const [st, setSt] = useState({
-    connectionState: 'disconnected', connectedCamera: null, connectionMode: null,
+    connectionState: 'disconnected', connectedCamera: null, connectionMode: null, connectionProfile: null,
     aiApiKey: localStorage.getItem('nikon_ai_key') || '',
     poseGuides: loadJSON(POSE_STORAGE_KEY, DEFAULT_POSE_GUIDES),
     aiSettings: loadJSON(AI_SETTINGS_KEY, DEFAULT_AI_SETTINGS),

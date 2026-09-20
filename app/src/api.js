@@ -22,6 +22,7 @@ let listeners = {};
 let reconnectTimer = null;
 let mobileSession = null; // 原生直连会话（仅手机 App）
 let mobileSessionMode = null;
+let mobileSessionProfile = null;
 let demoCam = null;       // 演示相机（无真机也能跑通）
 
 // ─── PTP 操作码 ───────────────────────────────────────
@@ -259,6 +260,22 @@ function extractJpeg(payload) {
   return null;
 }
 
+function formatConnectionError(error, { host, port, mode }) {
+  const raw = error?.message || String(error);
+  if (/EHOSTUNREACH|No route to host/i.test(raw)) {
+    return mode === 'sta'
+      ? `无法访问相机 ${host}:${port}。请确认手机和相机连接同一网络，并检查相机 IP 是否正确。`
+      : '手机当前无法访问相机热点。请确认已连接相机 WiFi，并检查相机是否仍处于遥控模式。';
+  }
+  if (/ECONNREFUSED|Connection refused/i.test(raw)) {
+    return `相机拒绝连接 ${host}:${port}。请确认相机已进入无线遥控模式，PTP/IP 端口为 ${port}。`;
+  }
+  if (/timeout|timed out|超时/i.test(raw)) {
+    return `连接相机 ${host}:${port} 超时。请检查网络、相机 IP 和相机屏幕上的连接状态。`;
+  }
+  return raw;
+}
+
 // ─── WebSocket ────────────────────────────────────────
 function connectWS() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
@@ -348,10 +365,10 @@ export const camera = {
    * 通用连接入口
    * mode: 'wifi' = 相机热点直连；'sta' = 相机已加入局域网；'usb' = 有线
    */
-  async connectCamera(mode, host, port) {
+  async connectCamera(mode, host, port, options = {}) {
     mode = mode || 'wifi';
-    host = host || '192.168.1.1';
     port = port || 15740;
+    const profile = mode === 'sta' ? (options.profile === 'device' ? 'device' : 'pc') : null;
 
     if (mode === 'demo') return this.connectDemo();
 
@@ -359,7 +376,18 @@ export const camera = {
       if (mode === 'usb') {
         return this.connectUsbDirect();
       }
-      return this.connectWifiDirect(host, port, mode);
+      if (mode === 'sta') {
+        const staHost = String(host || '').trim();
+        if (!staHost) {
+          const error = '请先填写相机在局域网中的 IP 地址。';
+          emit('status', { state: 'error', mode, error });
+          emit('error', { error, direct: true });
+          return { success: false, error };
+        }
+        return this.connectWifiDirect(staHost, port, mode, profile);
+      }
+      host = host || '192.168.1.1';
+      return this.connectWifiDirect(host, port, mode, null);
     }
 
     if (mode === 'usb') return this.connectUsb();
@@ -367,28 +395,46 @@ export const camera = {
   },
 
   /** 手机 App：在设备上用原生 TCP 直连相机 PTP/IP */
-  async connectWifiDirect(host, port, mode = 'wifi') {
+  async connectWifiDirect(host, port, mode = 'wifi', profile = null) {
     host = String(host || '192.168.1.1').trim();
     port = Number.parseInt(port, 10) || 15740;
-    emit('status', { state: 'connecting', mode, host, port, direct: true });
+    emit('status', { state: 'connecting', mode, profile, host, port, direct: true });
     const diag = msg => emit('diagnostic', msg);
+    let session = null;
     try {
-      const session = await openSession(host, port, diag);
+      session = await openSession(host, port, diag, null, message => {
+        if (mobileSession !== session) return;
+        mobileSession = null;
+        mobileSessionMode = null;
+        mobileSessionProfile = null;
+        emit('status', { state: 'error', mode, profile, host, port, error: message, direct: true });
+        emit('error', { error: message, direct: true });
+      });
       mobileSession = session;
       mobileSessionMode = mode;
+      mobileSessionProfile = profile;
       // 尝试读取设备信息以拿到真实型号（失败也不阻塞）
       let model = 'Nikon Z30';
       try {
         const dev = await session.command(OC.GetDeviceInfo, [], 5000);
         if (dev && dev.payload && dev.payload.length > 0) model = 'Nikon (PTP/IP)';
       } catch {}
-      emit('status', { state: 'session_open', mode, host, port, direct: true });
-      emit('camera_info', { model, connection: mode === 'sta' ? 'STA 局域网' : 'WiFi', ip: host });
+      emit('status', { state: 'session_open', mode, profile, host, port, direct: true });
+      emit('camera_info', {
+        model,
+        connection: mode === 'sta'
+          ? (profile === 'device' ? 'STA · 智能设备传输' : 'STA · PC 控制')
+          : 'WiFi',
+        ip: host,
+      });
       return { success: true, model };
     } catch (e) {
-      emit('status', { state: 'error', mode, error: e.message || String(e) });
-      emit('error', { error: e.message || String(e), direct: true });
-      return { success: false, error: e.message || String(e) };
+      const rawError = e?.message || String(e);
+      const message = formatConnectionError(e, { host, port, mode });
+      diag(`连接失败：${rawError}`);
+      emit('status', { state: 'error', mode, profile, host, port, error: message, rawError });
+      emit('error', { error: message, rawError, direct: true });
+      return { success: false, error: message, rawError };
     }
   },
 
@@ -403,6 +449,7 @@ export const camera = {
       const session = await openUsbSession(diag);
       mobileSession = session;
       mobileSessionMode = 'usb';
+      mobileSessionProfile = null;
       emit('status', { state: 'session_open', mode: 'usb', direct: true });
       emit('camera_info', { model: 'Nikon Z30 (USB)', connection: 'USB', ip: 'USB' });
       return { success: true, model: 'Nikon Z30 (USB)' };
@@ -416,7 +463,7 @@ export const camera = {
   /** 断开 */
   async disconnect() {
     if (demoCam) { try { await demoCam.disconnect(); } catch {} demoCam = null; }
-    if (mobileSession) { try { await mobileSession.close(); } catch {} mobileSession = null; mobileSessionMode = null; }
+    if (mobileSession) { try { await mobileSession.close(); } catch {} mobileSession = null; mobileSessionMode = null; mobileSessionProfile = null; }
     emit('status', { state: 'disconnected' });
     if (isNativeMobile()) return { success: true, direct: true };
     return fetchJSON('POST', '/api/disconnect');
@@ -425,7 +472,7 @@ export const camera = {
   /** 状态 */
   async getStatus() {
     if (demoCam) return { connected: true, mode: 'demo', direct: true };
-    if (mobileSession) return { connected: true, mode: mobileSessionMode || 'wifi', direct: true };
+    if (mobileSession) return { connected: true, mode: mobileSessionMode || 'wifi', profile: mobileSessionProfile, direct: true };
     return fetchJSON('GET', '/api/status');
   },
 
@@ -436,6 +483,11 @@ export const camera = {
   async capture() {
     if (demoCam) return demoCam.capture();
     if (mobileSession) {
+      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'device') {
+        const error = new Error('当前是 STA 智能设备传输模式，不能遥控拍照。请在相机端选择“连接到电脑”，并在 App 中选择“PC 控制”。');
+        error.code = 'STA_CAPTURE_UNSUPPORTED';
+        throw error;
+      }
       const attempts = [
         [0xFFFFFFFF, 0],
         [0xFFFFFFFF, 0xFFFFFFFF],
@@ -485,10 +537,15 @@ export const camera = {
   async startLiveView() {
     if (demoCam) return demoCam.startLiveView();
     if (mobileSession) {
+      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'device') {
+        const error = new Error('当前是 STA 智能设备传输模式，不能实时取景。请在相机端选择“连接到电脑”，并在 App 中选择“PC 控制”。');
+        error.code = 'STA_LIVEVIEW_UNSUPPORTED';
+        throw error;
+      }
       const resp = await mobileSession.command(OC.NikonStartLiveView, [], 10000);
       const success = resp.responseCode === 0x2001 || resp.responseCode === 0x201E;
       emit('liveview', { running: success });
-      if (!success) throw new Error(`启动实时取景失败：PTP 0x${resp.responseCode.toString(16)}`);
+      if (!success) throw new Error(`启动实时取景失败：PTP 0x${Number(resp.responseCode).toString(16)}`);
       return { success: true };
     }
     return fetchJSON('POST', '/api/liveview/start');
@@ -522,6 +579,11 @@ export const camera = {
   async autoFocus() {
     if (demoCam) return demoCam.autofocus();
     if (mobileSession) {
+      if (mobileSessionMode === 'sta' && mobileSessionProfile === 'device') {
+        const error = new Error('当前是 STA 智能设备传输模式，不能遥控对焦。请在相机端选择“连接到电脑”，并在 App 中选择“PC 控制”。');
+        error.code = 'STA_AF_UNSUPPORTED';
+        throw error;
+      }
       const resp = await mobileSession.command(OC.NikonAfDrive, []);
       const ok = resp.responseCode === 0x2001;
       if (!ok) throw new Error(`自动对焦失败：PTP 0x${resp.responseCode.toString(16)}`);

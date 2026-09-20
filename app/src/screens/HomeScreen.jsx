@@ -19,6 +19,8 @@ export default function HomeScreen() {
   const navigate = useNavigate();
   const [stats, setStats] = useState({ synced: 0, pending: 0, files: 0, capacity: 0 });
   const connected = state.connectionState === 'session_open';
+  const staMode = connected && state.connectionMode === 'sta';
+  const staTransferOnly = staMode && state.connectionProfile === 'device';
 
   useEffect(() => {
     try {
@@ -52,7 +54,7 @@ export default function HomeScreen() {
               <p className="section-label">当前设备</p>
               <p className="text-base font-semibold mt-0.5 truncate">{connected ? 'Nikon Z30' : '未连接相机'}</p>
               <p className="text-xs text-[var(--text-soft)] mt-1">
-                {connected ? `${mode} · 遥控会话已建立` : '通过 WiFi 热点、STA 或 USB Type-C 建立连接'}
+                {connected ? `${mode} · ${staTransferOnly ? '智能设备传输' : '遥控会话已建立'}` : '通过 WiFi 热点、STA 或 USB Type-C 建立连接'}
               </p>
             </div>
             {!connected && (
@@ -66,7 +68,13 @@ export default function HomeScreen() {
                 ['相机照片', Images, '/photos'],
                 ['同步任务', RefreshCw, '/sync'],
               ].map(([label, Icon, path]) => (
-                <button key={label} type="button" className="h-16 flex items-center justify-center gap-2 text-xs font-semibold text-[var(--text-soft)] border-r last:border-r-0 border-[var(--line)]" onClick={() => navigate(path)}>
+                <button
+                  key={label}
+                  type="button"
+                  className="h-16 flex items-center justify-center gap-2 text-xs font-semibold text-[var(--text-soft)] border-r last:border-r-0 border-[var(--line)] disabled:opacity-40"
+                  disabled={staTransferOnly && path === '/liveview'}
+                  onClick={() => navigate(path)}
+                >
                   <Icon size={16} /> {label}
                 </button>
               ))}

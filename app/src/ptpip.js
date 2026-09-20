@@ -260,7 +260,7 @@ function parseUsbContainers(bytes) {
 }
 
 export class PtpIpSession {
-  /** @param {{onDiagnose?: (msg: string)=>void, onError?: (msg: string)=>void}} opts */
+  /** @param {{onDiagnose?: (msg: string)=>void, onError?: (msg: string)=>void, onLost?: (msg: string)=>void}} opts */
   constructor(transport, opts = {}) {
     this.transport = transport;
     this.buffer = new ByteBuffer();
@@ -268,10 +268,12 @@ export class PtpIpSession {
     this.sessionId = 0;
     this.transactionId = 0;
     this.onDiagnose = opts.onDiagnose || (() => {});
+    this.onLost = opts.onLost || (() => {});
     this._unsubs = [];
     this._commandQueue = Promise.resolve();
     this.closed = false;
     this.opened = false;
+    this.intentionalClose = false;
   }
 
   _diag(msg) { this.onDiagnose(msg); try { console.log('[PTP/IP]', msg); } catch {} }
@@ -478,6 +480,7 @@ export class PtpIpSession {
 
   async close() {
     if (this.closed) return;
+    this.intentionalClose = true;
     if (this.sessionId) {
       try { await this.command(0x1003, [], 1500); } catch {}
     }
@@ -488,11 +491,20 @@ export class PtpIpSession {
 }
 
 // ─── 常用命令便捷封装 ──────────────────────────────────
-export async function openSession(host, port, onDiagnose, onError) {
+export async function openSession(host, port, onDiagnose, onError, onLost) {
   const transport = createTransport();
-  const session = new PtpIpSession(transport, { onDiagnose, onError });
+  const session = new PtpIpSession(transport, { onDiagnose, onError, onLost });
   try {
     await session.open(host, port);
+    if (typeof transport.onState === 'function') {
+      session._unsubs.push(transport.onState(event => {
+        if (session.closed || session.intentionalClose) return;
+        if (event?.state === 'disconnected' || event?.state === 'error') {
+          session.closed = true;
+          onLost?.('相机连接已断开，请重新连接。');
+        }
+      }));
+    }
     return session;
   } catch (e) {
     if (onError) onError(e.message || String(e));

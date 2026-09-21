@@ -112,7 +112,7 @@ export default function SettingsScreen() {
 
         <Section icon={Info} title="关于妮妮" description="Android 相机控制与修图应用">
           <div className="space-y-2 text-[10px] text-[var(--text-soft)]">
-            <div className="flex justify-between"><span>版本</span><span className="mono">1.4.3</span></div>
+            <div className="flex justify-between"><span>版本</span><span className="mono">1.4.4</span></div>
             <div className="flex justify-between"><span>相机协议</span><span className="mono">PTP / PTP-IP</span></div>
             <div className="flex justify-between"><span>图像处理</span><span>本地画布引擎</span></div>
           </div>

@@ -2,6 +2,7 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App.jsx';
 import { camera } from '../api.js';
+import { CAMERA_BRANDS } from '../cameraBrands.js';
 import {
   Cable, CheckCircle2, ChevronDown, ChevronUp, FlaskConical, Info, Network,
   PlugZap, RefreshCw, Settings2, Unplug, Wifi, XCircle,
@@ -12,6 +13,15 @@ const MODES = [
   { value: 'sta', label: 'STA 局域网', icon: Network },
   { value: 'usb', label: 'USB Type-C', icon: Cable },
   { value: 'demo', label: '实验模式', icon: FlaskConical },
+];
+
+const BRAND_OPTIONS = [
+  { value: 'auto', label: '自动识别' },
+  ...Object.values(CAMERA_BRANDS).filter(brand => brand.id !== 'generic').map(brand => ({
+    value: brand.id,
+    label: brand.label,
+    status: brand.status,
+  })),
 ];
 
 const GUIDES = {
@@ -48,6 +58,7 @@ const GUIDES = {
 };
 
 const CONNECTION_CONFIG_KEY = 'nini_connection_configs';
+const CONNECTION_PROFILES_KEY = 'nini_connection_profiles_v2';
 
 function loadConnectionConfigs() {
   try {
@@ -57,16 +68,60 @@ function loadConnectionConfigs() {
   }
 }
 
-function saveConnectionConfig(mode, host, port, profile = null) {
+function saveConnectionConfig(mode, host, port, profile = null, brand = 'auto') {
   try {
     const configs = loadConnectionConfigs();
     configs[mode] = {
       host: host || '',
       port: Number.parseInt(port, 10) || 15740,
       profile: profile || configs[mode]?.profile || 'pc',
+      brand: brand || configs[mode]?.brand || 'auto',
     };
     localStorage.setItem(CONNECTION_CONFIG_KEY, JSON.stringify(configs));
   } catch {}
+}
+
+function loadConnectionProfiles() {
+  try {
+    const profiles = JSON.parse(localStorage.getItem(CONNECTION_PROFILES_KEY) || '[]');
+    return Array.isArray(profiles) ? profiles : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistConnectionProfiles(profiles) {
+  try {
+    localStorage.setItem(CONNECTION_PROFILES_KEY, JSON.stringify(profiles.slice(0, 30)));
+  } catch {}
+}
+
+function profileKey(item) {
+  return [item.mode, item.brand || 'auto', item.host || '', Number(item.port) || 15740, item.profile || ''].join('|');
+}
+
+function profileLabel(item) {
+  const brand = CAMERA_BRANDS[item.brand]?.label || '自动识别';
+  const mode = MODES.find(option => option.value === item.mode)?.label || item.mode || '相机';
+  const target = item.mode === 'usb'
+    ? 'USB'
+    : `${item.host || '未填写'}:${item.port || 15740}`;
+  const profile = item.mode === 'sta'
+    ? ` · ${item.profile === 'device' ? '智能设备' : 'PC 控制'}`
+    : '';
+  return `${brand} · ${mode} · ${target}${profile}`;
+}
+
+function upsertConnectionProfile(profiles, item) {
+  const next = {
+    ...item,
+    port: Number.parseInt(item.port, 10) || 15740,
+    lastUsedAt: Date.now(),
+    id: profileKey(item),
+  };
+  return [next, ...profiles.filter(existing => profileKey(existing) !== next.id)]
+    .sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0))
+    .slice(0, 30);
 }
 
 function loadLast() {
@@ -96,6 +151,9 @@ export default function MyCameraScreen() {
   const [host, setHost] = useState(initialConfig.host || (initialMode === 'sta' ? '' : '192.168.1.1'));
   const [port, setPort] = useState(String(initialConfig.port || 15740));
   const [staProfile, setStaProfile] = useState(initialConfig.profile === 'device' ? 'device' : 'pc');
+  const [brand, setBrand] = useState(initialConfig.brand || 'auto');
+  const [profiles, setProfiles] = useState(loadConnectionProfiles);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [logs, setLogs] = useState([]);
@@ -107,6 +165,41 @@ export default function MyCameraScreen() {
   const [usbSupport, setUsbSupport] = useState(null);
   const [usbError, setUsbError] = useState('');
   const connected = state.connectionState === 'session_open';
+  const modeProfiles = profiles.filter(item => item.mode === mode);
+  const selectedProfile = modeProfiles.find(item => item.id === selectedProfileId) || null;
+
+  const applyProfile = (item) => {
+    if (!item) return;
+    setMode(item.mode);
+    setHost(item.host || (item.mode === 'sta' ? '' : '192.168.1.1'));
+    setPort(String(item.port || 15740));
+    setStaProfile(item.profile === 'device' ? 'device' : 'pc');
+    setBrand(item.brand || 'auto');
+    setSelectedProfileId(item.id || profileKey(item));
+    setError(null);
+  };
+
+  const saveCurrentProfile = () => {
+    const item = {
+      mode,
+      host,
+      port: Number.parseInt(port, 10) || 15740,
+      profile: mode === 'sta' ? staProfile : null,
+      brand,
+    };
+    const next = upsertConnectionProfile(profiles, item);
+    setProfiles(next);
+    persistConnectionProfiles(next);
+    setSelectedProfileId(profileKey(item));
+  };
+
+  const removeSelectedProfile = () => {
+    if (!selectedProfile) return;
+    const next = profiles.filter(item => item.id !== selectedProfile.id);
+    setProfiles(next);
+    persistConnectionProfiles(next);
+    setSelectedProfileId('');
+  };
 
   useEffect(() => {
     const cleanups = [
@@ -114,9 +207,22 @@ export default function MyCameraScreen() {
         updateState({ connectionState: data.state, connectionMode: data.mode, connectionProfile: data.profile || null });
         if (data.state === 'session_open') {
           setError(null);
-          const next = { mode: data.mode, time: Date.now(), host: data.host || '', port: data.port || 15740 };
+          const next = {
+            mode: data.mode,
+            time: Date.now(),
+            host: data.host || '',
+            port: data.port || 15740,
+            profile: data.profile || null,
+            brand: data.brand || brand,
+          };
           setLastConn(next);
-          saveConnectionConfig(data.mode, data.host, data.port, data.profile || null);
+          saveConnectionConfig(data.mode, data.host, data.port, data.profile || null, data.brand || brand);
+          setProfiles(previous => {
+            const updated = upsertConnectionProfile(previous, next);
+            persistConnectionProfiles(updated);
+            return updated;
+          });
+          setSelectedProfileId(profileKey(next));
           try { localStorage.setItem('nini_last_connection', JSON.stringify(next)); } catch {}
         }
       }),
@@ -125,7 +231,7 @@ export default function MyCameraScreen() {
       camera.on('camera_info', info => setCurrentInfo(info)),
     ];
     return () => cleanups.forEach(cleanup => typeof cleanup === 'function' && cleanup());
-  }, [updateState]);
+  }, [updateState, brand]);
 
   const changeMode = (value) => {
     setMode(value);
@@ -133,11 +239,18 @@ export default function MyCameraScreen() {
     setShowGuide(false);
     const configs = loadConnectionConfigs();
     const saved = configs[value] || {};
+    const recentProfile = profiles.find(item => item.mode === value);
+    if (recentProfile) {
+      applyProfile(recentProfile);
+      return;
+    }
     if (value === 'wifi') setHost(saved.host || '192.168.1.1');
     else if (value === 'sta') setHost(saved.host || '');
     else setHost('');
     setPort(String(saved.port || 15740));
     setStaProfile(saved.profile === 'device' ? 'device' : 'pc');
+    setBrand(saved.brand || 'auto');
+    setSelectedProfileId('');
   };
 
   const detectUsb = useCallback(async () => {
@@ -174,7 +287,7 @@ export default function MyCameraScreen() {
         mode,
         host,
         Number.parseInt(port, 10) || 15740,
-        mode === 'sta' ? { profile: staProfile } : undefined,
+        { profile: mode === 'sta' ? staProfile : null, brand },
       );
       if (!result.success && result.error) setError(result.error);
     } catch (e) {
@@ -204,6 +317,7 @@ export default function MyCameraScreen() {
     : activeMode.label;
   const activeHost = currentInfo?.ip || lastConn?.host || host;
   const activePort = lastConn?.port || port || 15740;
+  const selectedBrand = BRAND_OPTIONS.find(item => item.value === brand) || BRAND_OPTIONS[0];
 
   return (
     <div className="page">
@@ -237,6 +351,7 @@ export default function MyCameraScreen() {
           <div className="px-4">
             <DetailRow label="连接方式" value={activeModeLabel} />
             <DetailRow label="地址 / 端口" value={mode === 'usb' || mode === 'demo' ? activeMode.label : `${connected ? activeHost : (host || '未填写')}:${connected ? activePort : port}`} mono />
+            <DetailRow label="相机品牌" value={connected ? (currentInfo?.brandLabel || selectedBrand.label) : selectedBrand.label} />
             <DetailRow label="相机型号" value={connected ? (currentInfo?.model || 'Nikon Z30') : '未检测到'} />
             <DetailRow label="镜头信息" value={connected ? (currentInfo?.lens || '已连接，等待读取') : '未读取'} />
           </div>
@@ -276,6 +391,59 @@ export default function MyCameraScreen() {
               </button>
             ))}
           </div>
+
+          {mode !== 'demo' && (
+            <div className="px-3 pb-3">
+              <label className="block text-[10px] text-[var(--text-muted)] mb-1.5">相机品牌</label>
+              <select className="select" value={brand} onChange={event => setBrand(event.target.value)} disabled={busy || connected}>
+                {BRAND_OPTIONS.map(item => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}{item.status === 'experimental' ? '（实验）' : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedBrand.status === 'experimental' && (
+                <p className="mt-2 text-[10px] leading-4 text-[var(--warning)]">
+                  该品牌目前只接入通用 PTP 检测和照片浏览；取景、对焦、快门等私有能力未实现前会主动阻止发送。
+                </p>
+              )}
+            </div>
+          )}
+
+          {mode !== 'demo' && (
+            <div className="px-3 pb-3">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="text-[10px] text-[var(--text-muted)]">连接档案</span>
+                <span className="text-[9px] text-[var(--text-muted)]">{modeProfiles.length} 个已保存</span>
+              </div>
+              {modeProfiles.length > 0 ? (
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <select
+                    className="select"
+                    value={selectedProfile?.id || ''}
+                    onChange={event => {
+                      const item = modeProfiles.find(profile => profile.id === event.target.value);
+                      if (item) applyProfile(item);
+                    }}
+                    disabled={busy || connected}
+                  >
+                    <option value="">选择已保存的相机</option>
+                    {modeProfiles.map(item => (
+                      <option key={item.id} value={item.id}>{profileLabel(item)}</option>
+                    ))}
+                  </select>
+                  <button className="btn btn-secondary px-3" type="button" onClick={removeSelectedProfile} disabled={!selectedProfile || busy || connected} aria-label="删除连接档案">
+                    删除
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[10px] leading-4 text-[var(--text-muted)]">成功连接后会自动保存，下次可直接选择同一台相机。</p>
+              )}
+              <button className="btn btn-ghost w-full mt-1.5 text-[10px]" type="button" onClick={saveCurrentProfile} disabled={busy || mode === 'sta' && !host}>
+                保存当前连接参数
+              </button>
+            </div>
+          )}
 
           {mode !== 'usb' && mode !== 'demo' && (
             <div className="px-3 pb-3 grid grid-cols-[1fr_96px] gap-2">

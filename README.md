@@ -13,6 +13,8 @@
 - 相机 WiFi 热点直连：手机连接 Nikon 相机热点，默认地址 `192.168.1.1:15740`。
 - STA 局域网连接：相机和手机连接同一网络，在 App 中输入相机 IP；按相机端模式选择 PC 控制或智能设备传输。
 - USB Type-C：Android 手机作为 USB Host，通过 PTP over USB 控制相机。
+- 连接档案：可保存多台相机和多种连接参数，下次直接从历史记录选择。
+- 相机品牌识别：支持 Nikon 完整适配；Canon、Sony、Fujifilm 已接入识别和通用 PTP 能力边界，未实现厂商私有功能前会阻止不兼容命令。
 - 连接状态与历史连接记录分开显示。
 - 每种连接方式都有软件内教程和诊断日志。
 
@@ -20,6 +22,7 @@
 
 - 手机查看相机实时画面，真机测试约 7–15 FPS。
 - 实时取景默认锁定横屏，并完整显示相机画面。
+- 监视器模式：保持屏幕常亮，取景断流或停止后自动尝试恢复连接。
 - 右下角按钮在横屏和竖屏之间切换，不会裁切画面。
 - 可直接调节曝光模式、ISO、快门、光圈、曝光补偿、白平衡、测光、对焦和驱动模式。
 - 当前档位从相机读取，支持 `M / A / S / P / AUTO / U1 / U2 / U3`。
@@ -164,7 +167,7 @@ app/android/app/build/outputs/apk/debug/app-debug.apk
 `.github/workflows/android-release.yml` 会在 `main` 分支收到包含 `[release]` 的提交时：
 
 1. 安装依赖。
-2. 运行 PTP/IP、USB 和假相机故障场景自检。
+2. 运行 PTP/IP、USB、假相机故障场景和跨品牌适配自检。
 3. 构建 Web 资源和 Android APK。
 4. 读取 `app/package.json` 中的版本号。
 5. 创建 `v版本号` GitHub Release。

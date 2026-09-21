@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.view.Window;
+import android.view.WindowManager;
 
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -70,6 +71,29 @@ public class CameraUiPlugin extends Plugin {
         controller.setSystemBarsBehavior(
             WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
         );
+      }
+
+      JSObject result = new JSObject();
+      result.put("enabled", enabled);
+      call.resolve(result);
+    });
+  }
+
+  @PluginMethod
+  public void setKeepAwake(PluginCall call) {
+    Activity activity = getActivity();
+    if (activity == null) {
+      call.reject("Activity is not available");
+      return;
+    }
+
+    boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled", false));
+    activity.runOnUiThread(() -> {
+      Window window = activity.getWindow();
+      if (enabled) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+      } else {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
       }
 
       JSObject result = new JSObject();

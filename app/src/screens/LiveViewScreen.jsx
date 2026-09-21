@@ -6,7 +6,7 @@ import PoseLibrary from '../components/PoseLibrary.jsx';
 import CameraControlPanel from '../components/CameraControlPanel.jsx';
 import CompositionGuides, { COMPOSITION_MODES } from '../components/CompositionGuides.jsx';
 import {
-  ArrowLeft, Aperture, Camera, Grid3X3, RotateCcw, SlidersHorizontal, UserRound,
+  ArrowLeft, Aperture, Camera, Grid3X3, Monitor, RotateCcw, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 
 const INITIAL_QUICK = {
@@ -18,6 +18,7 @@ const INITIAL_QUICK = {
 };
 
 const GUIDE_STORAGE = 'nini_composition_guide';
+const MONITOR_STORAGE = 'nini_monitor_mode';
 
 function initialGuide() {
   try {
@@ -25,6 +26,14 @@ function initialGuide() {
     if (saved && COMPOSITION_MODES.some(item => item.id === saved.mode)) return saved;
   } catch {}
   return { mode: 'thirds', opacity: 0.42 };
+}
+
+function initialMonitorMode() {
+  try {
+    return localStorage.getItem(MONITOR_STORAGE) === 'true';
+  } catch {
+    return false;
+  }
 }
 
 export default function LiveViewScreen() {
@@ -40,6 +49,7 @@ export default function LiveViewScreen() {
   const [posePanelOpen, setPosePanelOpen] = useState(false);
   const [guidePanelOpen, setGuidePanelOpen] = useState(false);
   const [landscape, setLandscape] = useState(true);
+  const [monitorMode, setMonitorMode] = useState(initialMonitorMode);
   const [quick, setQuick] = useState(INITIAL_QUICK);
   const [guide, setGuide] = useState(initialGuide);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
@@ -50,6 +60,8 @@ export default function LiveViewScreen() {
   const lvRunningRef = useRef(false);
   const lvStartingRef = useRef(false);
   const frameStatsRef = useRef({ count: 0, startedAt: performance.now() });
+  const lastFrameAtRef = useRef(0);
+  const monitorRestartingRef = useRef(false);
   const mountedRef = useRef(true);
   const connected = state.connectionState === 'session_open';
   const staTransferOnly = state.connectionMode === 'sta';
@@ -78,6 +90,14 @@ export default function LiveViewScreen() {
   useEffect(() => {
     try { localStorage.setItem(GUIDE_STORAGE, JSON.stringify(guide)); } catch {}
   }, [guide]);
+
+  useEffect(() => {
+    try { localStorage.setItem(MONITOR_STORAGE, String(monitorMode)); } catch {}
+    camera.setKeepAwake(Boolean(monitorMode && connected)).catch(() => {});
+    return () => {
+      camera.setKeepAwake(false).catch(() => {});
+    };
+  }, [monitorMode, connected]);
 
   useEffect(() => {
     const update = () => {
@@ -120,6 +140,7 @@ export default function LiveViewScreen() {
           if (!mountedRef.current || !lvRunningRef.current) return;
           if (result?.frame) {
             setFrame(result.frame);
+            lastFrameAtRef.current = performance.now();
             const stats = frameStatsRef.current;
             stats.count += 1;
             const elapsed = performance.now() - stats.startedAt;
@@ -159,6 +180,40 @@ export default function LiveViewScreen() {
       if (clearFrame) setFrame(null);
     }
   };
+
+  useEffect(() => {
+    if (!connected || !monitorMode) return undefined;
+
+    const resume = async () => {
+      if (monitorRestartingRef.current || !mountedRef.current) return;
+      const now = performance.now();
+      const stale = lvRunningRef.current && now - (lastFrameAtRef.current || 0) > 5000;
+      const stopped = !lvRunningRef.current && !lvStartingRef.current;
+      if (!stale && !stopped) return;
+
+      monitorRestartingRef.current = true;
+      setLvError(stale ? '监视器正在恢复取景…' : '');
+      try {
+        if (lvRunningRef.current) await stopLV(false);
+        await new Promise(resolve => setTimeout(resolve, 900));
+        if (mountedRef.current && state.connectionState === 'session_open') await startLV();
+      } finally {
+        monitorRestartingRef.current = false;
+      }
+    };
+
+    const timer = setInterval(resume, 2500);
+    const handleVisibility = () => {
+      if (!document.hidden) resume();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+    // startLV/stopLV intentionally use the latest refs and connection state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, monitorMode, state.connectionState]);
 
   useEffect(() => {
     if (!connected) return undefined;
@@ -317,7 +372,7 @@ export default function LiveViewScreen() {
               </div>
               <div className="text-right leading-none">
                 <div className={`text-[12px] font-bold ${lvOn ? 'text-[var(--green)]' : 'text-white/35'}`}>实时</div>
-                <div className="text-[9px] text-white/45 mt-1">{lvOn ? '取景中' : '待机'}</div>
+                <div className="text-[9px] text-white/45 mt-1">{monitorMode ? '监视器' : lvOn ? '取景中' : '待机'}</div>
               </div>
             </div>
           </div>
@@ -417,6 +472,14 @@ export default function LiveViewScreen() {
       <div className="absolute left-0 right-0 bottom-0 z-50 h-[96px] px-3 pt-2 pb-3 bg-gradient-to-t from-black via-black/90 to-transparent">
         <div className="relative h-full flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <button
+              className={`w-11 h-11 rounded-full border flex items-center justify-center ${monitorMode ? 'bg-[var(--green)]/20 border-[var(--green)] text-[var(--green)]' : 'bg-white/8 border-white/12 text-white/70'}`}
+              onClick={() => setMonitorMode(value => !value)}
+              aria-label={monitorMode ? '关闭监视器模式' : '开启监视器模式'}
+              title={monitorMode ? '关闭监视器模式' : '监视器模式：屏幕常亮并自动重连'}
+            >
+              <Monitor size={18} />
+            </button>
             <button
               className={`w-11 h-11 rounded-full border flex items-center justify-center ${guidePanelOpen ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]' : 'bg-white/8 border-white/12 text-white/75'}`}
               onClick={() => { setPanelOpen(false); setPosePanelOpen(false); setGuidePanelOpen(value => !value); }}

@@ -12,6 +12,12 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { openSession, openUsbSession, PtpIpSession, UsbPtp, isNativeMobile } from './ptpip.js';
 import { createDemoCamera } from './demoCamera.js';
 import { encodePropValue, decodePropValue, ptpPropertyLabel } from './nikonProperties.js';
+import {
+  CAMERA_BRANDS,
+  brandSummary,
+  detectCameraBrand,
+  getBrandCapabilities,
+} from './cameraBrands.js';
 
 const API = ''; // 相对路径，同源
 const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
@@ -23,6 +29,8 @@ let reconnectTimer = null;
 let mobileSession = null; // 原生直连会话（仅手机 App）
 let mobileSessionMode = null;
 let mobileSessionProfile = null;
+let mobileSessionBrand = null;
+let mobileSessionModel = null;
 let demoCam = null;       // 演示相机（无真机也能跑通）
 
 // ─── PTP 操作码 ───────────────────────────────────────
@@ -64,6 +72,38 @@ function diagnosticTransport() {
   return isNativeMobile() ? '原生直连' : '本机服务';
 }
 
+function explicitBrand(brandId) {
+  if (!brandId || brandId === 'auto') return null;
+  return CAMERA_BRANDS[brandId] || null;
+}
+
+function readDeviceInfoVendorExtensionId(payload) {
+  if (!payload || payload.length < 6) return null;
+  return readU32LE(payload, 2);
+}
+
+function resolveCameraBrand(requestedBrand, model, vendorExtensionId = null) {
+  return explicitBrand(requestedBrand)
+    || detectCameraBrand({ model, vendorExtensionId });
+}
+
+function cameraInfo(brand, model) {
+  return {
+    ...brandSummary(brand),
+    model,
+  };
+}
+
+function assertCameraCapability(capability, actionLabel) {
+  const { brand, capabilities } = getBrandCapabilities(mobileSessionBrand);
+  if (capabilities[capability]) return brand;
+  const error = new Error(`${brand.label} 当前未实现${actionLabel}，已阻止发送不兼容的私有命令。`);
+  error.code = 'CAMERA_BRAND_CAPABILITY_UNSUPPORTED';
+  error.brand = brand.id;
+  error.capability = capability;
+  throw error;
+}
+
 function emitPropertyDiagnostic(entry) {
   const record = {
     timestamp: Date.now(),
@@ -72,6 +112,7 @@ function emitPropertyDiagnostic(entry) {
     opHex: ptpHex(entry.opCode),
     responseHex: ptpHex(entry.responseCode),
     transport: diagnosticTransport(),
+    brand: mobileSessionBrand || 'unknown',
     ...entry,
   };
   propertyDiagnostics = [record, ...propertyDiagnostics].slice(0, MAX_PROPERTY_DIAGNOSTICS);
@@ -368,6 +409,17 @@ export const camera = {
     }
   },
 
+  /** 监视器模式：保持屏幕常亮 */
+  async setKeepAwake(enabled) {
+    const next = Boolean(enabled);
+    if (!isNativeMobile()) return { enabled: next, web: true };
+    try {
+      return await CameraUi.setKeepAwake({ enabled: next });
+    } catch (e) {
+      return { enabled: next, error: e.message || String(e) };
+    }
+  },
+
   /** 是否跑在原生 App（手机）里 */
   isNative: () => isNativeMobile(),
 
@@ -402,12 +454,13 @@ export const camera = {
     mode = mode || 'wifi';
     port = port || 15740;
     const profile = mode === 'sta' ? (options.profile === 'device' ? 'device' : 'pc') : null;
+    const brand = options.brand || 'auto';
 
     if (mode === 'demo') return this.connectDemo();
 
     if (isNativeMobile()) {
       if (mode === 'usb') {
-        return this.connectUsbDirect();
+        return this.connectUsbDirect(brand);
       }
       if (mode === 'sta') {
         const staHost = String(host || '').trim();
@@ -417,10 +470,10 @@ export const camera = {
           emit('error', { error, direct: true });
           return { success: false, error };
         }
-        return this.connectWifiDirect(staHost, port, mode, profile);
+        return this.connectWifiDirect(staHost, port, mode, profile, brand);
       }
       host = host || '192.168.1.1';
-      return this.connectWifiDirect(host, port, mode, null);
+      return this.connectWifiDirect(host, port, mode, null, brand);
     }
 
     if (mode === 'usb') return this.connectUsb();
@@ -428,39 +481,59 @@ export const camera = {
   },
 
   /** 手机 App：在设备上用原生 TCP 直连相机 PTP/IP */
-  async connectWifiDirect(host, port, mode = 'wifi', profile = null) {
+  async connectWifiDirect(host, port, mode = 'wifi', profile = null, requestedBrand = 'auto') {
     host = String(host || '192.168.1.1').trim();
     port = Number.parseInt(port, 10) || 15740;
     emit('status', { state: 'connecting', mode, profile, host, port, direct: true });
     const diag = msg => emit('diagnostic', msg);
     let session = null;
     try {
+      const selectedBrand = explicitBrand(requestedBrand);
+      const clientName = !selectedBrand || selectedBrand.id === 'nikon'
+        ? (profile === 'pc' ? 'Nikon PC' : 'Nikon')
+        : 'Nini PTP';
       session = await openSession(host, port, diag, null, message => {
         if (mobileSession !== session) return;
         mobileSession = null;
         mobileSessionMode = null;
         mobileSessionProfile = null;
+        mobileSessionBrand = null;
+        mobileSessionModel = null;
         emit('status', { state: 'error', mode, profile, host, port, error: message, direct: true });
         emit('error', { error: message, direct: true });
-      }, { clientName: profile === 'pc' ? 'Nikon PC' : 'Nini' });
+      }, { clientName });
       mobileSession = session;
       mobileSessionMode = mode;
       mobileSessionProfile = profile;
-      // 尝试读取设备信息以拿到真实型号（失败也不阻塞）
-      let model = 'Nikon Z30';
+      // 尝试读取设备信息以识别品牌（失败也不阻塞连接）。
+      let model = selectedBrand ? `${selectedBrand.label} PTP/IP` : 'Nikon PTP/IP';
+      let vendorExtensionId = null;
       try {
         const dev = await session.command(OC.GetDeviceInfo, [], 5000);
-        if (dev && dev.payload && dev.payload.length > 0) model = 'Nikon (PTP/IP)';
+        vendorExtensionId = readDeviceInfoVendorExtensionId(dev?.payload);
       } catch {}
-      emit('status', { state: 'session_open', mode, profile, host, port, direct: true });
+      const brand = resolveCameraBrand(requestedBrand, model, vendorExtensionId);
+      mobileSessionBrand = brand.id;
+      mobileSessionModel = model;
+      emit('status', {
+        state: 'session_open',
+        mode,
+        profile,
+        host,
+        port,
+        brand: brand.id,
+        brandLabel: brand.label,
+        direct: true,
+      });
       emit('camera_info', {
+        ...cameraInfo(brand, model),
         model,
         connection: mode === 'sta'
           ? (profile === 'device' ? 'STA · 智能设备传输' : 'STA · PC 控制')
           : 'WiFi',
         ip: host,
       });
-      return { success: true, model };
+      return { success: true, model, brand: brand.id, brandLabel: brand.label };
     } catch (e) {
       const rawError = e?.message || String(e);
       const message = formatConnectionError(e, { host, port, mode });
@@ -475,17 +548,25 @@ export const camera = {
   async connectUsb() { return fetchJSON('POST', '/api/connect/usb'); },
 
   /** 手机 App：Type-C / OTG 原生 USB 直连 */
-  async connectUsbDirect() {
+  async connectUsbDirect(requestedBrand = 'auto') {
     emit('status', { state: 'connecting', mode: 'usb', direct: true });
     const diag = msg => emit('diagnostic', msg);
     try {
       const session = await openUsbSession(diag);
+      const brand = explicitBrand(requestedBrand) || CAMERA_BRANDS.nikon;
       mobileSession = session;
       mobileSessionMode = 'usb';
       mobileSessionProfile = null;
-      emit('status', { state: 'session_open', mode: 'usb', direct: true });
-      emit('camera_info', { model: 'Nikon Z30 (USB)', connection: 'USB', ip: 'USB' });
-      return { success: true, model: 'Nikon Z30 (USB)' };
+      mobileSessionBrand = brand.id;
+      mobileSessionModel = `${brand.label} (USB)`;
+      emit('status', { state: 'session_open', mode: 'usb', brand: brand.id, brandLabel: brand.label, direct: true });
+      emit('camera_info', {
+        ...cameraInfo(brand, mobileSessionModel),
+        model: mobileSessionModel,
+        connection: 'USB',
+        ip: 'USB',
+      });
+      return { success: true, model: mobileSessionModel, brand: brand.id, brandLabel: brand.label };
     } catch (e) {
       emit('status', { state: 'error', mode: 'usb', error: e.message || String(e) });
       emit('error', { error: e.message || String(e), direct: true });
@@ -496,7 +577,14 @@ export const camera = {
   /** 断开 */
   async disconnect() {
     if (demoCam) { try { await demoCam.disconnect(); } catch {} demoCam = null; }
-    if (mobileSession) { try { await mobileSession.close(); } catch {} mobileSession = null; mobileSessionMode = null; mobileSessionProfile = null; }
+    if (mobileSession) {
+      try { await mobileSession.close(); } catch {}
+      mobileSession = null;
+      mobileSessionMode = null;
+      mobileSessionProfile = null;
+      mobileSessionBrand = null;
+      mobileSessionModel = null;
+    }
     emit('status', { state: 'disconnected' });
     if (isNativeMobile()) return { success: true, direct: true };
     return fetchJSON('POST', '/api/disconnect');
@@ -505,7 +593,16 @@ export const camera = {
   /** 状态 */
   async getStatus() {
     if (demoCam) return { connected: true, mode: 'demo', direct: true };
-    if (mobileSession) return { connected: true, mode: mobileSessionMode || 'wifi', profile: mobileSessionProfile, direct: true };
+    if (mobileSession) {
+      return {
+        connected: true,
+        mode: mobileSessionMode || 'wifi',
+        profile: mobileSessionProfile,
+        brand: mobileSessionBrand,
+        model: mobileSessionModel,
+        direct: true,
+      };
+    }
     return fetchJSON('GET', '/api/status');
   },
 
@@ -516,6 +613,7 @@ export const camera = {
   async capture() {
     if (demoCam) return demoCam.capture();
     if (mobileSession) {
+      assertCameraCapability('capture', '遥控拍照');
       if (mobileSessionMode === 'sta' && mobileSessionProfile === 'device') {
         const error = new Error('当前是 STA 智能设备传输模式，不能遥控拍照。请在相机端选择“连接到电脑”，并在 App 中选择“PC 控制”。');
         error.code = 'STA_CAPTURE_UNSUPPORTED';
@@ -657,6 +755,7 @@ export const camera = {
   async startLiveView() {
     if (demoCam) return demoCam.startLiveView();
     if (mobileSession) {
+      assertCameraCapability('liveView', '实时取景');
       if (mobileSessionMode === 'sta') {
         const error = new Error('Nikon Z30 在 STA 模式下启动实时取景会退出当前网络。实时取景请使用相机 WiFi 热点或 USB Type-C；STA 继续用于照片传输和控制。');
         error.code = 'STA_LIVEVIEW_UNSUPPORTED';
@@ -675,7 +774,9 @@ export const camera = {
   async stopLiveView() {
     if (demoCam) return demoCam.stopLiveView();
     if (mobileSession) {
-      try { await mobileSession.command(OC.NikonEndLiveView, []); } catch {}
+      if (getBrandCapabilities(mobileSessionBrand).capabilities.liveView) {
+        try { await mobileSession.command(OC.NikonEndLiveView, []); } catch {}
+      }
       emit('liveview', { running: false });
       return { success: true };
     }
@@ -686,6 +787,7 @@ export const camera = {
   async getLiveViewFrame() {
     if (demoCam) return demoCam.getLiveViewFrame();
     if (mobileSession) {
+      assertCameraCapability('liveView', '实时取景');
       const resp = await mobileSession.command(OC.NikonGetLiveViewImg, [], 12000);
       if (resp.responseCode !== 0x2001) return { frame: null, code: resp.responseCode, direct: true };
       const jpeg = extractJpeg(resp.payload);
@@ -699,6 +801,7 @@ export const camera = {
   async autoFocus() {
     if (demoCam) return demoCam.autofocus();
     if (mobileSession) {
+      assertCameraCapability('autofocus', '自动对焦');
       if (mobileSessionMode === 'sta' && mobileSessionProfile === 'device') {
         const error = new Error('当前是 STA 智能设备传输模式，不能遥控对焦。请在相机端选择“连接到电脑”，并在 App 中选择“PC 控制”。');
         error.code = 'STA_AF_UNSUPPORTED';

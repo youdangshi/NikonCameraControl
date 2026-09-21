@@ -2,7 +2,8 @@ import React, { useContext, useEffect, useState } from 'react';
 import { AppContext } from '../App.jsx';
 import { camera } from '../api.js';
 import {
-  Aperture, Camera, Focus, Gauge, Palette, RefreshCw, Ruler, Sun, Timer,
+  Activity, Aperture, Camera, ChevronDown, ChevronUp, Focus, Gauge, Palette,
+  RefreshCw, Ruler, Sun, Timer, Trash2,
 } from 'lucide-react';
 import {
   PTP_PROP,
@@ -43,6 +44,52 @@ function enumKey(table, raw) {
   return Object.keys(table).find(key => table[key] === value) || null;
 }
 
+const RESPONSE_HINTS = {
+  0x2001: '成功',
+  0x2005: '相机拒绝或不支持',
+  0x200F: '相机当前状态不允许写入',
+  0x2019: '相机正忙',
+  0x201E: '会话已打开',
+  0x201F: '相机未接受参数',
+};
+
+function formatPropValue(propCode, value) {
+  if (value == null) return '--';
+  const code = Number(propCode);
+  if (code === PTP_PROP.ExposureTime) return exposureTimeMicrosToLabel(value);
+  if (code === PTP_PROP.FNumber) return fNumberLabel(value);
+  if (code === PTP_PROP.ExposureProgramMode) return exposureProgramLabel(value);
+  if (code === PTP_PROP.ExposureIndex) return Number(value) === 0xFFFFFFFF ? 'AUTO' : String(value);
+  if (code === PTP_PROP.ExposureBiasCompensation) {
+    const stops = Number(value) / 1000;
+    return `${stops >= 0 ? '+' : ''}${stops.toFixed(1)} EV`;
+  }
+  if (code === PTP_PROP.WhiteBalance) return enumKey(WHITE_BALANCE_CODES, value) || String(value);
+  if (code === PTP_PROP.FocusMode) return enumKey(FOCUS_MODE_CODES, value) || String(value);
+  if (code === PTP_PROP.ExposureMeteringMode) return enumKey(METERING_CODES, value) || String(value);
+  if (code === PTP_PROP.StillCaptureMode) return enumKey(DRIVE_MODE_CODES, value) || String(value);
+  return String(value);
+}
+
+function diagnosticResult(item) {
+  if (item.operation === 'read') {
+    if (item.responseCode === 0x2001) return `读取成功 · ${formatPropValue(item.propCode, item.value)}`;
+    if (item.error) return `读取超时 · ${item.error}`;
+    return `读取失败 · ${RESPONSE_HINTS[item.responseCode] || item.responseHex}`;
+  }
+  if (item.responseCode !== 0x2001) {
+    if (item.error) return `写入超时 · ${item.error}`;
+    return `写入失败 · ${RESPONSE_HINTS[item.responseCode] || item.responseHex}`;
+  }
+  if (item.readbackError) return `写入成功 · 读回超时（${item.readbackError}）`;
+  if (item.readbackCode !== 0x2001) {
+    return `写入成功 · 读回失败（${RESPONSE_HINTS[item.readbackCode] || item.readbackRawHex || '--'}）`;
+  }
+  const target = formatPropValue(item.propCode, item.requestedValue);
+  const actual = formatPropValue(item.propCode, item.readbackValue);
+  return item.matches ? `写入并读回一致 · ${actual}` : `写入成功但未生效 · ${target} → ${actual}`;
+}
+
 function StepControl({ label, value, values, format = v => v, onChange, disabled = false, icon: Icon, accent = 'var(--accent)' }) {
   const index = values ? values.indexOf(value) : -1;
   const canDown = values && index > 0;
@@ -80,6 +127,8 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
   const [metering, setMetering] = useState(null);
   const [drive, setDrive] = useState(null);
   const [propError, setPropError] = useState('');
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [propertyDiagnostics, setPropertyDiagnostics] = useState(() => camera.getPropertyDiagnostics?.() || []);
 
   const shutLabel = shutterI == null ? '--' : (SHUTTER_LABELS[shutterI] || '--');
   const apLabel = apertureI == null ? '--' : (APERTURE_LABELS[apertureI] || '--');
@@ -90,6 +139,15 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
     if (!onStateChange) return;
     onStateChange({ expMode: expMode || '--', iso: iso ?? '--', shutter: shutLabel, aperture: apLabel, ev: ecValue ?? 0 });
   }, [onStateChange, expMode, iso, shutLabel, apLabel, ecValue]);
+
+  useEffect(() => {
+    const unsubscribe = camera.onPropertyDiagnostic?.(item => {
+      setPropertyDiagnostics(previous => [item, ...previous].slice(0, 50));
+    });
+    return () => {
+      try { if (typeof unsubscribe === 'function') unsubscribe(); } catch {}
+    };
+  }, []);
 
   useEffect(() => {
     if (state.connectionState !== 'session_open') return undefined;
@@ -147,6 +205,11 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
         const codeText = result?.code != null ? `PTP 0x${Number(result.code).toString(16)}` : '无响应';
         setPropError(`${label}写入失败（${codeText}）`);
         return false;
+      }
+      if (result.verified === false) {
+        const target = formatPropValue(code, value);
+        const actual = result.readbackValue == null ? '未读到值' : formatPropValue(code, result.readbackValue);
+        setPropError(`${label}已发送，但相机未确认生效（目标 ${target}，读回 ${actual}）`);
       }
       return true;
     } catch (e) {
@@ -228,6 +291,77 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
       </div>
 
       {propError && <div className="panel px-3 py-2.5 text-[10px] leading-4 text-[var(--warning)]">{propError}</div>}
+
+      <section className="panel overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--line)]">
+          <button
+            type="button"
+            className="flex items-center gap-2 min-w-0 flex-1 text-left"
+            onClick={() => setDiagnosticsOpen(value => !value)}
+          >
+            <Activity size={14} className="text-[var(--blue)]" />
+            <span className="text-[11px] font-semibold">参数诊断</span>
+            <span className="badge badge-blue">{propertyDiagnostics.length}</span>
+            {propertyDiagnostics.some(item => !item.ok) && (
+              <span className="badge badge-red">{propertyDiagnostics.filter(item => !item.ok).length} 异常</span>
+            )}
+            <span className="ml-auto text-[var(--text-muted)]">
+              {diagnosticsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </span>
+          </button>
+          {propertyDiagnostics.length > 0 && (
+            <button
+              type="button"
+              className="btn-icon w-7 h-7"
+              title="清空诊断记录"
+              aria-label="清空诊断记录"
+              onClick={() => {
+                camera.clearPropertyDiagnostics?.();
+                setPropertyDiagnostics([]);
+              }}
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+        {diagnosticsOpen && (
+          <div className="divide-y divide-[var(--line)] max-h-72 overflow-auto">
+            {propertyDiagnostics.length === 0 ? (
+              <p className="px-3 py-4 text-center text-[10px] text-[var(--text-muted)]">等待参数读写记录</p>
+            ) : propertyDiagnostics.map((item, index) => (
+              <div key={`${item.timestamp}-${index}`} className="px-3 py-2.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-semibold truncate">{item.property}</span>
+                  <span className={`badge ${item.operation === 'write' ? 'badge-yellow' : 'badge-blue'}`}>
+                    {item.operation === 'write' ? '写入' : '读取'}
+                  </span>
+                  <span className={`badge ${item.ok ? 'badge-green' : 'badge-red'}`}>
+                    {item.ok ? '正常' : '异常'}
+                  </span>
+                  <span className="ml-auto text-[9px] text-[var(--text-muted)] mono">{item.transport}</span>
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[9px] text-[var(--text-muted)] mono">
+                  <span>操作 {item.opHex}</span>
+                  <span>响应 {item.responseHex}</span>
+                  <span>{item.elapsedMs} ms</span>
+                  <span>{item.propHex}</span>
+                </div>
+                <p className={`mt-1 text-[10px] leading-4 ${item.ok ? 'text-[var(--text-soft)]' : 'text-[var(--warning)]'}`}>
+                  {diagnosticResult(item)}
+                </p>
+                {(item.rawHex || item.readbackRawHex) && (
+                  <p className="mt-1 text-[9px] leading-4 text-[var(--text-muted)] mono break-all">
+                    {item.rawHex && <span>{item.operation === 'write' ? '写入' : '数据'} {item.rawHex}</span>}
+                    {item.rawHex && item.readbackRawHex && <span> · </span>}
+                    {item.readbackRawHex && <span>读回 {item.readbackRawHex}</span>}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <div className="flex items-center justify-center gap-2 text-[9px] text-[var(--text-muted)] py-2"><RefreshCw size={11} /> 参数每 3 秒从相机同步一次</div>
     </div>
   );

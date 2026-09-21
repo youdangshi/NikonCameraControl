@@ -1,6 +1,6 @@
 {
   "name": "nini",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "妮妮 - Nikon Z30 WiFi/USB 相机控制与本地修图",
   "type": "module",
   "license": "MIT",
@@ -10,6 +10,8 @@
     "dev": "vite",
     "start": "electron .",
     "test:protocol": "node scripts/protocol-smoke.mjs",
+    "test:fake-camera": "node scripts/fake-camera-test.mjs",
+    "test:all": "npm run test:protocol && npm run test:fake-camera",
     "build": "vite build && electron-builder",
     "dist:portable": "vite build && electron-builder --win portable",
     "dist:installer": "vite build && electron-builder --win nsis"

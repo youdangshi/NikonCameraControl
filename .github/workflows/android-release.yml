@@ -36,11 +36,11 @@ jobs:
           ls "$SDK_ROOT/platforms"
           ls "$SDK_ROOT/build-tools"
 
-      - name: Install dependencies and run protocol smoke test
+      - name: Install dependencies and run protocol self-tests
         working-directory: app
         run: |
           npm ci --no-audit --no-fund
-          npm run test:protocol
+          npm run test:all
 
       - name: Build web assets and sync Capacitor
         working-directory: app

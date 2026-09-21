@@ -21,6 +21,26 @@ export const PTP_PROP = Object.freeze({
   NikonApplicationMode: 0xD1F0,
 });
 
+export const PTP_PROP_NAMES = Object.freeze({
+  [PTP_PROP.WhiteBalance]: '白平衡',
+  [PTP_PROP.FNumber]: '光圈',
+  [PTP_PROP.FocusMode]: '对焦模式',
+  [PTP_PROP.ExposureMeteringMode]: '测光模式',
+  [PTP_PROP.ExposureTime]: '快门速度',
+  [PTP_PROP.ExposureProgramMode]: '曝光模式',
+  [PTP_PROP.ExposureIndex]: 'ISO',
+  [PTP_PROP.ExposureBiasCompensation]: '曝光补偿',
+  [PTP_PROP.StillCaptureMode]: '驱动模式',
+  [PTP_PROP.NikonRecordingMedia]: '记录介质',
+  [PTP_PROP.NikonLiveViewSelector]: '实时取景选择器',
+  [PTP_PROP.NikonApplicationMode]: '应用模式',
+});
+
+export function ptpPropertyLabel(propCode) {
+  const code = Number(propCode);
+  return PTP_PROP_NAMES[code] || `相机属性 0x${code.toString(16).padStart(4, '0').toUpperCase()}`;
+}
+
 export const EXPOSURE_PROGRAM_CODES = Object.freeze({
   M: 1,
   P: 2,

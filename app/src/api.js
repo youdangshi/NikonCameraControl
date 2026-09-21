@@ -11,7 +11,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { openSession, openUsbSession, PtpIpSession, UsbPtp, isNativeMobile } from './ptpip.js';
 import { createDemoCamera } from './demoCamera.js';
-import { encodePropValue, decodePropValue } from './nikonProperties.js';
+import { encodePropValue, decodePropValue, ptpPropertyLabel } from './nikonProperties.js';
 
 const API = ''; // 相对路径，同源
 const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
@@ -45,6 +45,38 @@ const OC = {
   NikonAfDrive: 0x90C1,
   NikonInitiateCaptureRecInMedia: 0x9207,
 };
+
+const MAX_PROPERTY_DIAGNOSTICS = 50;
+let propertyDiagnostics = [];
+
+function nowMs() {
+  try { return performance.now(); } catch { return Date.now(); }
+}
+
+function ptpHex(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '--';
+  return `0x${Number(value).toString(16).padStart(4, '0').toUpperCase()}`;
+}
+
+function diagnosticTransport() {
+  if (mobileSessionMode === 'usb') return 'USB';
+  if (mobileSessionMode) return 'PTP/IP';
+  return isNativeMobile() ? '原生直连' : '本机服务';
+}
+
+function emitPropertyDiagnostic(entry) {
+  const record = {
+    timestamp: Date.now(),
+    property: ptpPropertyLabel(entry.propCode),
+    propHex: ptpHex(entry.propCode),
+    opHex: ptpHex(entry.opCode),
+    responseHex: ptpHex(entry.responseCode),
+    transport: diagnosticTransport(),
+    ...entry,
+  };
+  propertyDiagnostics = [record, ...propertyDiagnostics].slice(0, MAX_PROPERTY_DIAGNOSTICS);
+  emit('property:diagnostic', record);
+}
 
 function readU32LE(bytes, offset) {
   return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
@@ -517,8 +549,35 @@ export const camera = {
   async getProp(propCode) {
     if (demoCam) return demoCam.getProp(propCode);
     if (mobileSession) {
-      const resp = await mobileSession.command(OC.GetDevicePropValue, [propCode]);
-      return { value: decodePropValue(resp.payload, propCode), code: resp.responseCode };
+      const startedAt = nowMs();
+      try {
+        const resp = await mobileSession.command(OC.GetDevicePropValue, [propCode]);
+        const value = resp.responseCode === 0x2001
+          ? decodePropValue(resp.payload, propCode)
+          : null;
+        emitPropertyDiagnostic({
+          operation: 'read',
+          opCode: OC.GetDevicePropValue,
+          propCode,
+          responseCode: resp.responseCode,
+          elapsedMs: Math.round(nowMs() - startedAt),
+          rawHex: hexPreview(resp.payload, 24),
+          value,
+          ok: resp.responseCode === 0x2001,
+        });
+        return { value, code: resp.responseCode, raw: resp.payload };
+      } catch (e) {
+        emitPropertyDiagnostic({
+          operation: 'read',
+          opCode: OC.GetDevicePropValue,
+          propCode,
+          responseCode: null,
+          elapsedMs: Math.round(nowMs() - startedAt),
+          error: e.message || String(e),
+          ok: false,
+        });
+        throw e;
+      }
     }
     return fetchJSON('POST', '/api/prop/get', { propCode });
   },
@@ -528,8 +587,68 @@ export const camera = {
     if (demoCam) return demoCam.setProp(propCode, value);
     if (mobileSession) {
       const data = encodePropValue(propCode, value);
-      const resp = await mobileSession.command(OC.SetDevicePropValue, [propCode], 8000, data);
-      return { success: resp.responseCode === 0x2001, code: resp.responseCode };
+      const startedAt = nowMs();
+      try {
+        const resp = await mobileSession.command(OC.SetDevicePropValue, [propCode], 8000, data);
+        const success = resp.responseCode === 0x2001;
+        let readbackCode = null;
+        let readbackValue = null;
+        let readbackRaw = null;
+        let readbackError = '';
+        let matches = false;
+
+        if (success) {
+          try {
+            const readback = await mobileSession.command(OC.GetDevicePropValue, [propCode], 3000);
+            readbackCode = readback.responseCode;
+            readbackRaw = readback.payload;
+            if (readback.responseCode === 0x2001) {
+              readbackValue = decodePropValue(readback.payload, propCode);
+              matches = Number(readbackValue) === Number(value);
+            }
+          } catch (e) {
+            readbackError = e.message || String(e);
+          }
+        }
+
+        emitPropertyDiagnostic({
+          operation: 'write',
+          opCode: OC.SetDevicePropValue,
+          propCode,
+          responseCode: resp.responseCode,
+          elapsedMs: Math.round(nowMs() - startedAt),
+          requestedValue: value,
+          rawHex: hexPreview(data, 24),
+          readbackCode,
+          readbackValue,
+          readbackRawHex: hexPreview(readbackRaw, 24),
+          readbackError,
+          matches,
+          ok: success && readbackCode === 0x2001 && matches,
+        });
+
+        return {
+          success,
+          code: resp.responseCode,
+          verified: success && readbackCode === 0x2001 && matches,
+          readbackCode,
+          readbackValue,
+          readbackError,
+        };
+      } catch (e) {
+        emitPropertyDiagnostic({
+          operation: 'write',
+          opCode: OC.SetDevicePropValue,
+          propCode,
+          responseCode: null,
+          elapsedMs: Math.round(nowMs() - startedAt),
+          requestedValue: value,
+          rawHex: hexPreview(data, 24),
+          error: e.message || String(e),
+          ok: false,
+        });
+        throw e;
+      }
     }
     return fetchJSON('POST', '/api/prop/set', { propCode, value });
   },
@@ -722,6 +841,14 @@ export const camera = {
 
   /** 提交诊断日志回调（真机验证时展示握手细节） */
   onDiagnostic: (fn) => on('diagnostic', fn),
+
+  /** 参数读写握手、耗时和写后读回诊断 */
+  onPropertyDiagnostic: (fn) => on('property:diagnostic', fn),
+  getPropertyDiagnostics: () => propertyDiagnostics.slice(),
+  clearPropertyDiagnostics() {
+    propertyDiagnostics = [];
+    emit('property:diagnostic:clear');
+  },
 
   /** 事件监听 */
   on,

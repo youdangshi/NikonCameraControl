@@ -23,6 +23,7 @@
 - 右下角按钮在横屏和竖屏之间切换，不会裁切画面。
 - 可直接调节曝光模式、ISO、快门、光圈、曝光补偿、白平衡、测光、对焦和驱动模式。
 - 当前档位从相机读取，支持 `M / A / S / P / AUTO / U1 / U2 / U3`。
+- 参数诊断记录操作码、响应码、耗时、原始字节，并在写入后从相机读回，区分“命令成功”和“实际生效”。
 - 支持自动对焦和遥控拍照。
 - 专业构图辅助：三分线、黄金分割、精密网格、中心构图、对角引导、水平仪。
 - 构图线只覆盖相机实际画面区域，支持透明度调节。
@@ -133,7 +134,7 @@ PTP/PTP-IP 的基础传输层是通用的，但实时取景、快门、对焦和
 ```bash
 cd app
 npm ci
-npm run test:protocol
+npm run test:all
 npx vite build
 npx cap sync android
 cd android
@@ -145,7 +146,7 @@ Windows 使用：
 ```powershell
 cd app
 npm ci
-npm run test:protocol
+npm run test:all
 npx vite build
 npx cap sync android
 cd android
@@ -163,7 +164,7 @@ app/android/app/build/outputs/apk/debug/app-debug.apk
 `.github/workflows/android-release.yml` 会在 `main` 分支收到包含 `[release]` 的提交时：
 
 1. 安装依赖。
-2. 运行协议自检。
+2. 运行 PTP/IP、USB 和假相机故障场景自检。
 3. 构建 Web 资源和 Android APK。
 4. 读取 `app/package.json` 中的版本号。
 5. 创建 `v版本号` GitHub Release。

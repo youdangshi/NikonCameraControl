@@ -19,12 +19,14 @@ import {
   exposureTimeMicrosToLabel,
   fNumberLabel,
 } from '../nikonProperties.js';
-
-const ISO_VALUES = [100,125,160,200,250,320,400,500,640,800,1000,1250,1600,2000,2500,3200,4000,5000,6400,8000,10000,12800,16000,20000,25600,32000,40000,51200];
-const SHUTTER_LABELS = ['30"','25"','20"','15"','13"','10"','8"','6"','5"','4"','3.2"','2.5"','2"','1.6"','1.3"','1"','1/1.3','1/1.6','1/2','1/2.5','1/3','1/4','1/5','1/6','1/8','1/10','1/13','1/15','1/20','1/25','1/30','1/40','1/50','1/60','1/80','1/100','1/125','1/160','1/200','1/250','1/320','1/400','1/500','1/640','1/800','1/1000','1/1250','1/1600','1/2000','1/2500','1/3200','1/4000'];
-const APERTURE_LABELS = ['F1.4','F1.6','F1.8','F2','F2.2','F2.5','F2.8','F3.2','F3.5','F4','F4.5','F5','F5.6','F6.3','F7.1','F8','F9','F10','F11','F13','F14','F16','F18','F20','F22'];
-const EXP_COMP_VALUES = [-5,-4.666,-4.333,-4,-3.666,-3.333,-3,-2.666,-2.333,-2,-1.666,-1.333,-1,-0.666,-0.333,0,0.333,0.666,1,1.333,1.666,2,2.333,2.666,3,3.333,3.666,4,4.333,4.666,5];
-const EXPOSURE_MODE_OPTIONS = ['M','A','S','P','AUTO','U1','U2','U3'];
+import {
+  APERTURE_LABELS,
+  EXP_COMP_VALUES,
+  EXPOSURE_MODE_OPTIONS,
+  ISO_VALUES,
+  SHUTTER_LABELS,
+  buildControlCatalog,
+} from '../cameraControlCatalog.js';
 
 function nearestIndex(values, target) {
   let best = -1;
@@ -129,9 +131,13 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
   const [propError, setPropError] = useState('');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [propertyDiagnostics, setPropertyDiagnostics] = useState(() => camera.getPropertyDiagnostics?.() || []);
+  const [catalog, setCatalog] = useState(() => buildControlCatalog());
 
-  const shutLabel = shutterI == null ? '--' : (SHUTTER_LABELS[shutterI] || '--');
-  const apLabel = apertureI == null ? '--' : (APERTURE_LABELS[apertureI] || '--');
+  const isoOptions = catalog.isoOptions;
+  const shutterOptions = catalog.shutterOptions;
+  const apertureOptions = catalog.apertureOptions;
+  const shutLabel = shutterI == null ? '--' : (shutterOptions[shutterI] || '--');
+  const apLabel = apertureI == null ? '--' : (apertureOptions[apertureI] || '--');
   const ecValue = expCompI == null ? null : EXP_COMP_VALUES[expCompI];
   const ecLabel = ecValue == null ? '--' : `${ecValue >= 0 ? '+' : ''}${ecValue.toFixed(1)}`;
 
@@ -148,6 +154,19 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
       try { if (typeof unsubscribe === 'function') unsubscribe(); } catch {}
     };
   }, []);
+
+  useEffect(() => {
+    if (state.connectionState !== 'session_open') return undefined;
+    let catalogCancelled = false;
+    Promise.all([
+      camera.getPropDesc?.(PTP_PROP.ExposureIndex),
+      camera.getPropDesc?.(PTP_PROP.ExposureTime),
+      camera.getPropDesc?.(PTP_PROP.FNumber),
+    ]).then(([iso, shutter, aperture]) => {
+      if (!catalogCancelled) setCatalog(buildControlCatalog({ iso, shutter, aperture }));
+    }).catch(() => {});
+    return () => { catalogCancelled = true; };
+  }, [state.connectionState]);
 
   useEffect(() => {
     if (state.connectionState !== 'session_open') return undefined;
@@ -174,12 +193,12 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
       if (isoRaw != null) setIso(Number(isoRaw) === 0xFFFFFFFF ? 'AUTO' : Number(isoRaw));
       if (shutterRaw != null) {
         const label = exposureTimeMicrosToLabel(shutterRaw);
-        const index = SHUTTER_LABELS.indexOf(label);
+        const index = shutterOptions.indexOf(label);
         if (index >= 0) setShutterI(index);
       }
       if (apertureRaw != null) {
         const label = fNumberLabel(apertureRaw);
-        const index = APERTURE_LABELS.indexOf(label);
+        const index = apertureOptions.indexOf(label);
         if (index >= 0) setApertureI(index);
       }
       if (wbRaw != null) setWb(previous => enumKey(WHITE_BALANCE_CODES, wbRaw) || previous);
@@ -195,7 +214,7 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
     };
     sync();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [state.connectionState]);
+  }, [state.connectionState, shutterOptions, apertureOptions]);
 
   const setProp = async (code, value, label) => {
     setPropError('');
@@ -240,9 +259,9 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
       </section>
 
       <div className="flex gap-2">
-        <StepControl label="ISO" value={iso ?? '--'} values={ISO_VALUES} onChange={async value => { if (await setProp(PTP_PROP.ExposureIndex, value, 'ISO')) setIso(value); }} disabled={expMode === 'AUTO'} icon={Sun} />
-        <StepControl label="快门" value={shutLabel} values={SHUTTER_LABELS} onChange={async value => { if (await setProp(PTP_PROP.ExposureTime, shutterLabelToMicros(value), '快门')) setShutterI(SHUTTER_LABELS.indexOf(value)); }} disabled={expMode === 'A' || expMode === 'P'} icon={Timer} />
-        <StepControl label="光圈" value={apLabel} values={APERTURE_LABELS} onChange={async value => { if (await setProp(PTP_PROP.FNumber, apertureLabelToHundredths(value), '光圈')) setApertureI(APERTURE_LABELS.indexOf(value)); }} disabled={expMode === 'S' || expMode === 'P'} icon={Aperture} />
+        <StepControl label="ISO" value={iso ?? '--'} values={isoOptions} onChange={async value => { if (await setProp(PTP_PROP.ExposureIndex, value, 'ISO')) setIso(value); }} disabled={expMode === 'AUTO'} icon={Sun} />
+        <StepControl label="快门" value={shutLabel} values={shutterOptions} onChange={async value => { if (await setProp(PTP_PROP.ExposureTime, shutterLabelToMicros(value), '快门')) setShutterI(shutterOptions.indexOf(value)); }} disabled={expMode === 'A' || expMode === 'P'} icon={Timer} />
+        <StepControl label="光圈" value={apLabel} values={apertureOptions} onChange={async value => { if (await setProp(PTP_PROP.FNumber, apertureLabelToHundredths(value), '光圈')) setApertureI(apertureOptions.indexOf(value)); }} disabled={expMode === 'S' || expMode === 'P'} icon={Aperture} />
       </div>
 
       <section className="panel px-3 py-3 flex items-center justify-between gap-3">
@@ -363,6 +382,19 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
       </section>
 
       <div className="flex items-center justify-center gap-2 text-[9px] text-[var(--text-muted)] py-2"><RefreshCw size={11} /> 参数每 3 秒从相机同步一次</div>
+      {catalog.summary.length > 0 && (
+        <div className="panel px-3 py-2.5">
+          <p className="text-[10px] font-semibold text-[var(--text-soft)]">相机可调档位</p>
+          <div className="mt-1.5 space-y-1">
+            {catalog.summary.map(item => (
+              <div key={item.label} className="flex justify-between gap-3 text-[9px] text-[var(--text-muted)]">
+                <span>{item.label}</span>
+                <span className="mono">{item.count} 档 · {item.range}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

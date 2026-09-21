@@ -6,6 +6,8 @@ import {
 } from '../editor/presets.js';
 import { renderPreview, exportEdited, loadImage, parseCubeLut } from '../editor/imageEngine.js';
 import { parseNp3 } from '../editor/np3.js';
+import HistogramChart from '../components/HistogramChart.jsx';
+import { HISTOGRAM_BINS } from '../histogram.js';
 import {
   ArrowLeft, BookOpen, Check, CloudSun, Download, ImageOff, Palette, RotateCcw, ScanLine,
   SlidersHorizontal, Sparkles, UserRound,
@@ -195,37 +197,6 @@ function ColorWheels({ wheels, onChange }) {
       >
         <RotateCcw size={14} /> 重置色彩轮
       </button>
-    </div>
-  );
-}
-
-const HISTOGRAM_BINS = 128;
-
-function histogramPath(bins, width = 128, height = 52, fill = false) {
-  if (!bins?.length) return '';
-  const max = Math.max(1, ...bins);
-  const points = bins.map((value, index) => {
-    const x = (index / (bins.length - 1)) * width;
-    const y = height - (value / max) * (height - 4);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const line = `M ${points.join(' L ')}`;
-  return fill ? `${line} L ${width},${height} L 0,${height} Z` : line;
-}
-
-function HistogramChart({ histogram, compact = false }) {
-  return (
-    <div className={`rounded-md border border-white/10 bg-black/70 overflow-hidden ${compact ? 'w-[126px] p-1.5' : 'p-2'}`}>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[9px] text-white/55">直方图</span>
-        <span className="text-[8px] text-white/35">RGB 通道</span>
-      </div>
-      <svg viewBox="0 0 128 52" className={compact ? 'w-full h-[48px]' : 'w-full h-[72px]'} preserveAspectRatio="none">
-        <path d={histogramPath(histogram?.lum)} fill="rgba(255,255,255,.12)" />
-        <path d={histogramPath(histogram?.r)} fill="none" stroke="rgba(255,90,90,.82)" strokeWidth="1.1" vectorEffect="non-scaling-stroke" />
-        <path d={histogramPath(histogram?.g)} fill="none" stroke="rgba(75,222,128,.82)" strokeWidth="1.1" vectorEffect="non-scaling-stroke" />
-        <path d={histogramPath(histogram?.b)} fill="none" stroke="rgba(85,145,255,.9)" strokeWidth="1.1" vectorEffect="non-scaling-stroke" />
-      </svg>
     </div>
   );
 }

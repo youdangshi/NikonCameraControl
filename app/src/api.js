@@ -18,6 +18,7 @@ import {
   detectCameraBrand,
   getBrandCapabilities,
 } from './cameraBrands.js';
+import { parseDevicePropDesc } from './ptpPropertyDesc.js';
 
 const API = ''; // 相对路径，同源
 const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
@@ -43,6 +44,7 @@ const OC = {
   GetObjectInfo: 0x1008,
   GetObject: 0x1009,
   GetThumbnail: 0x100A,
+  GetDevicePropDesc: 0x1014,
   InitiateCapture: 0x100E,
   GetDevicePropValue: 0x1015,
   SetDevicePropValue: 0x1016,
@@ -678,6 +680,39 @@ export const camera = {
       }
     }
     return fetchJSON('POST', '/api/prop/get', { propCode });
+  },
+
+  /** 读取相机声明的属性能力、当前值和可调范围 */
+  async getPropDesc(propCode) {
+    if (!mobileSession) return { responseCode: null, unsupported: true };
+    const startedAt = nowMs();
+    try {
+      const resp = await mobileSession.command(OC.GetDevicePropDesc, [propCode], 8000);
+      let descriptor = null;
+      if (resp.responseCode === 0x2001) descriptor = parseDevicePropDesc(resp.payload);
+      emitPropertyDiagnostic({
+        operation: 'descriptor',
+        opCode: OC.GetDevicePropDesc,
+        propCode,
+        responseCode: resp.responseCode,
+        elapsedMs: Math.round(nowMs() - startedAt),
+        rawHex: hexPreview(resp.payload, 32),
+        value: descriptor,
+        ok: resp.responseCode === 0x2001,
+      });
+      return { ...descriptor, responseCode: resp.responseCode };
+    } catch (e) {
+      emitPropertyDiagnostic({
+        operation: 'descriptor',
+        opCode: OC.GetDevicePropDesc,
+        propCode,
+        responseCode: null,
+        elapsedMs: Math.round(nowMs() - startedAt),
+        error: e.message || String(e),
+        ok: false,
+      });
+      return { responseCode: null, error: e.message || String(e) };
+    }
   },
 
   /** 设置属性 */

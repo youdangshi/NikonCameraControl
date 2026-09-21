@@ -37,7 +37,15 @@ export const PTP_PROP_NAMES = Object.freeze({
 });
 
 // Nikon reports 0x500D in units of 100 microseconds.
-const NIKON_EXPOSURE_TIME_UNIT_MICROS = 100;
+export const NIKON_EXPOSURE_TIME_UNIT_MICROS = 100;
+
+export function nikonExposureRawToMicros(value) {
+  return Number(value) * NIKON_EXPOSURE_TIME_UNIT_MICROS;
+}
+
+export function nikonExposureMicrosToRaw(value) {
+  return Math.round(Number(value) / NIKON_EXPOSURE_TIME_UNIT_MICROS);
+}
 
 export function ptpPropertyLabel(propCode) {
   const code = Number(propCode);
@@ -136,7 +144,7 @@ export function encodePropValue(propCode, value) {
     return writeLittleEndian(Math.round(value), 2);
   }
   if (propCode === PTP_PROP.ExposureTime) {
-    return writeLittleEndian(Math.round(Number(value) / NIKON_EXPOSURE_TIME_UNIT_MICROS), 4);
+    return writeLittleEndian(nikonExposureMicrosToRaw(value), 4);
   }
   if (UINT8_PROPS.has(propCode)) {
     return writeLittleEndian(Math.round(value), 1);
@@ -162,7 +170,7 @@ export function decodePropValue(payload, propCode) {
     return value >= 0x8000 ? value - 0x10000 : value;
   }
   if (propCode === PTP_PROP.ExposureTime && payload.length >= 4) {
-    return readU32LE(payload, 0) * NIKON_EXPOSURE_TIME_UNIT_MICROS;
+    return nikonExposureRawToMicros(readU32LE(payload, 0));
   }
   if (UINT16_PROPS.has(propCode) && payload.length >= 2) return readU16LE(payload, 0);
   return payload.length >= 4 ? readU32LE(payload, 0) : payload[0];

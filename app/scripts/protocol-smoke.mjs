@@ -11,6 +11,8 @@ import {
   apertureLabelToHundredths,
   exposureCompensationToMilliEv,
 } from '../src/nikonProperties.js';
+import { parseDevicePropDesc } from '../src/ptpPropertyDesc.js';
+import { buildControlCatalog } from '../src/cameraControlCatalog.js';
 
 const u16 = (bytes, offset) => bytes[offset] | (bytes[offset + 1] << 8);
 const u32 = (bytes, offset) =>
@@ -167,5 +169,23 @@ assertEqual(decodePropValue(new Uint8Array([0xb3, 0xfe]), PTP_PROP.ExposureBiasC
 assertEqual(decodePropValue(new Uint8Array([3, 0]), PTP_PROP.ExposureMeteringMode), 3, 'decode UINT16 property');
 assertBytes(encodePropValue(PTP_PROP.ExposureTime, 25000), [0xfa, 0x00, 0x00, 0x00], 'Nikon 1/40 shutter encoding');
 assertEqual(decodePropValue(new Uint8Array([0xfa, 0x00, 0x00, 0x00]), PTP_PROP.ExposureTime), 25000, 'Nikon shutter decode to microseconds');
+
+const descPayload = new Uint8Array(25);
+writeU16(descPayload, 0, PTP_PROP.ExposureTime);
+writeU16(descPayload, 2, 0x0006);
+descPayload[4] = 0x01;
+writeU32(descPayload, 5, 250);
+writeU32(descPayload, 9, 250);
+descPayload[13] = 0x02;
+writeU16(descPayload, 14, 2);
+writeU32(descPayload, 16, 250);
+writeU32(descPayload, 20, 200);
+const parsedDesc = parseDevicePropDesc(descPayload);
+assertEqual(parsedDesc.form, 'enumeration', 'parse shutter descriptor form');
+assertBytes(new Uint8Array([parsedDesc.values[0] & 0xff]), [0xfa], 'parse shutter descriptor first value');
+const catalog = buildControlCatalog({ shutter: { ...parsedDesc, responseCode: 0x2001 } });
+if (!catalog.shutterOptions.includes('1/40') || !catalog.shutterOptions.includes('1/50')) {
+  throw new Error(`catalog should include 1/40 and 1/50, got ${catalog.shutterOptions.slice(0, 8).join(',')}`);
+}
 
 console.log('protocol smoke tests passed');

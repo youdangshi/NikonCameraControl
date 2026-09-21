@@ -165,5 +165,7 @@ assertBytes(encodePropValue(PTP_PROP.WhiteBalance, WHITE_BALANCE_CODES.CLOUDY), 
 assertBytes(encodePropValue(PTP_PROP.ExposureBiasCompensation, -333), [0xb3, 0xfe], 'signed exposure bias');
 assertEqual(decodePropValue(new Uint8Array([0xb3, 0xfe]), PTP_PROP.ExposureBiasCompensation), -333, 'decode signed exposure bias');
 assertEqual(decodePropValue(new Uint8Array([3, 0]), PTP_PROP.ExposureMeteringMode), 3, 'decode UINT16 property');
+assertBytes(encodePropValue(PTP_PROP.ExposureTime, 25000), [0xfa, 0x00, 0x00, 0x00], 'Nikon 1/40 shutter encoding');
+assertEqual(decodePropValue(new Uint8Array([0xfa, 0x00, 0x00, 0x00]), PTP_PROP.ExposureTime), 25000, 'Nikon shutter decode to microseconds');
 
 console.log('protocol smoke tests passed');

@@ -36,6 +36,9 @@ export const PTP_PROP_NAMES = Object.freeze({
   [PTP_PROP.NikonApplicationMode]: '应用模式',
 });
 
+// Nikon reports 0x500D in units of 100 microseconds.
+const NIKON_EXPOSURE_TIME_UNIT_MICROS = 100;
+
 export function ptpPropertyLabel(propCode) {
   const code = Number(propCode);
   return PTP_PROP_NAMES[code] || `相机属性 0x${code.toString(16).padStart(4, '0').toUpperCase()}`;
@@ -132,6 +135,9 @@ export function encodePropValue(propCode, value) {
   if (propCode === PTP_PROP.ExposureBiasCompensation) {
     return writeLittleEndian(Math.round(value), 2);
   }
+  if (propCode === PTP_PROP.ExposureTime) {
+    return writeLittleEndian(Math.round(Number(value) / NIKON_EXPOSURE_TIME_UNIT_MICROS), 4);
+  }
   if (UINT8_PROPS.has(propCode)) {
     return writeLittleEndian(Math.round(value), 1);
   }
@@ -154,6 +160,9 @@ export function decodePropValue(payload, propCode) {
   if (propCode === PTP_PROP.ExposureBiasCompensation && payload.length >= 2) {
     const value = readU16LE(payload, 0);
     return value >= 0x8000 ? value - 0x10000 : value;
+  }
+  if (propCode === PTP_PROP.ExposureTime && payload.length >= 4) {
+    return readU32LE(payload, 0) * NIKON_EXPOSURE_TIME_UNIT_MICROS;
   }
   if (UINT16_PROPS.has(propCode) && payload.length >= 2) return readU16LE(payload, 0);
   return payload.length >= 4 ? readU32LE(payload, 0) : payload[0];

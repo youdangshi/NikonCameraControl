@@ -59,6 +59,44 @@ function readU32BE(data, offset) {
   return ((data[offset]&0xFF)<<24) | ((data[offset+1]&0xFF)<<16) | ((data[offset+2]&0xFF)<<8) | (data[offset+3]&0xFF);
 }
 
+const UINT16_PROPS = new Set([0x5005, 0x5007, 0x500A, 0x500B, 0x500E, 0x500F, 0x5013]);
+const UINT8_PROPS = new Set([0xD10B, 0xD1A6, 0xD1F0]);
+
+function decodeNikonProp(propCode, bytesOrValue) {
+  if (Buffer.isBuffer(bytesOrValue) || bytesOrValue instanceof Uint8Array) {
+    const bytes = Buffer.from(bytesOrValue);
+    if (!bytes.length) return 0;
+    if (propCode === 0x500D && bytes.length >= 4) return readU32LE(bytes, 0) * 100;
+    if (propCode === 0x5010 && bytes.length >= 2) {
+      const raw = bytes[0] | (bytes[1] << 8);
+      return raw >= 0x8000 ? raw - 0x10000 : raw;
+    }
+    if (UINT8_PROPS.has(propCode)) return bytes[0];
+    if (UINT16_PROPS.has(propCode) && bytes.length >= 2) return bytes[0] | (bytes[1] << 8);
+    return bytes.length >= 4 ? readU32LE(bytes, 0) : bytes[0];
+  }
+  const value = Number(bytesOrValue);
+  if (propCode === 0x500D) return value * 100;
+  return value;
+}
+
+function encodeNikonProp(propCode, value) {
+  const number = Math.round(Number(value));
+  let byteLength = 4;
+  if (propCode === 0x500D) {
+    const raw = Math.round(number / 100);
+    const out = Buffer.alloc(4);
+    writeU32LE(out, 0, raw);
+    return out;
+  }
+  if (propCode === 0x5010) byteLength = 2;
+  else if (UINT8_PROPS.has(propCode)) byteLength = 1;
+  else if (UINT16_PROPS.has(propCode)) byteLength = 2;
+  const out = Buffer.alloc(byteLength);
+  writeU32LE(out, 0, number >>> 0);
+  return out;
+}
+
 function buildPtpCmd(opCode, params = []) {
   const ptpBuf = Buffer.alloc(30);
   let off = 0;
@@ -251,31 +289,21 @@ function usbConnect() {
       connectionMode = 'usb';
       broadcast('status', { state: 'connected', mode: 'usb' });
 
-      // 发送 OpenSession
+      // 发送标准 USB PTP OpenSession
       setTimeout(async () => {
         try {
-          const cmdBuf = Buffer.alloc(32);
-          writeU32LE(cmdBuf, 0, 12 + 4); // length
-          writeU32LE(cmdBuf, 4, 1);      // type=Command
-          cmdBuf[8] = 0x02; cmdBuf[9] = 0x10; // OpenSession 0x1002
-          writeU32LE(cmdBuf, 10, ++transactionId);
-          writeU32LE(cmdBuf, 14, 1); // param1=1
-
-          outEp.transfer(cmdBuf, (err) => {
-            if (err) { reject(err); return; }
-            inEp.transfer(1024, (err2, data) => {
-              if (err2) { reject(err2); return; }
-              const resp = parsePtpResp(data);
-              if (resp && resp.respCode === 0x2001) {
-                sessionId = 1;
-                broadcast('status', { state: 'session_open', mode: 'usb' });
-                broadcast('camera_info', { model: 'Nikon Z30', connection: 'USB' });
-                resolve(true);
-              } else {
-                reject(new Error('USB OpenSession failed'));
-              }
-            });
-          });
+          const drained = await drainUsbInput(inEp, 350);
+          if (drained > 0) broadcast('usb_diag', `已清理 USB 残留数据 ${drained} 字节`);
+          transactionId = 0;
+          const resp = await sendUsbCmd(0x1002, [1]);
+          if (resp && (resp.respCode === 0x2001 || resp.respCode === 0x201E)) {
+            sessionId = 1;
+            broadcast('status', { state: 'session_open', mode: 'usb' });
+            broadcast('camera_info', { model: 'Nikon Z30', connection: 'USB' });
+            resolve(true);
+          } else {
+            reject(new Error(`USB OpenSession failed: 0x${Number(resp?.respCode || 0).toString(16)}`));
+          }
         } catch (err) { reject(err); }
       }, 300);
     } catch (err) {
@@ -378,12 +406,16 @@ function handleHTTP(req, res) {
         const resp = connectionMode === 'wifi'
           ? await sendPtpCmd(0x1015, [json.propCode])
           : await sendUsbCmd(0x1015, [json.propCode]);
-        result = { value: resp?.params?.[0] || 0 };
+        const rawValue = connectionMode === 'usb' ? resp?.data : resp?.params?.[0];
+        result = {
+          value: decodeNikonProp(json.propCode, rawValue || 0),
+          code: resp?.respCode ?? null,
+        };
       } else if (url === '/api/prop/set' && method === 'POST') {
         const resp = connectionMode === 'wifi'
           ? await sendPtpCmd(0x1016, [json.propCode, json.value])
-          : await sendUsbCmd(0x1016, [json.propCode, json.value]);
-        result = { success: resp && resp.respCode === 0x2001 };
+          : await sendUsbCmd(0x1016, [json.propCode], 8000, encodeNikonProp(json.propCode, json.value));
+        result = { success: resp && resp.respCode === 0x2001, code: resp?.respCode ?? null };
       } else if (url === '/api/liveview/start' && method === 'POST') {
         const resp = connectionMode === 'wifi'
           ? await sendPtpCmd(0x9201)
@@ -399,7 +431,9 @@ function handleHTTP(req, res) {
           const resp = connectionMode === 'wifi'
             ? await sendPtpCmd(0x9203)
             : await sendUsbCmd(0x9203);
-          if (resp && resp.params[0] > 0) {
+          if (connectionMode === 'usb' && resp?.data?.length) {
+            result = { frame: resp.data.toString('base64'), size: resp.data.length };
+          } else if (resp && resp.params[0] > 0) {
             const data = await receiveData(resp.params[0]);
             result = { frame: data.toString('base64'), size: resp.params[0] };
           } else { result = { frame: null }; }
@@ -437,22 +471,148 @@ function handleHTTP(req, res) {
   });
 }
 
-function sendUsbCmd(opCode, params = []) {
+function drainUsbInput(inEp, idleMs = 350) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    let drained = 0;
+    const next = () => {
+      if (Date.now() - startedAt > idleMs) {
+        resolve(drained);
+        return;
+      }
+      inEp.timeout = 120;
+      inEp.transfer(65536, (error, data) => {
+        if (error) {
+          resolve(drained);
+          return;
+        }
+        if (data?.length) {
+          drained += data.length;
+          setImmediate(next);
+        } else {
+          next();
+        }
+      });
+    };
+    next();
+  });
+}
+function buildUsbContainer(type, code, tx, payload = Buffer.alloc(0)) {
+  const buf = Buffer.alloc(12 + payload.length);
+  writeU32LE(buf, 0, buf.length);
+  buf[4] = type & 0xFF;
+  buf[5] = (type >> 8) & 0xFF;
+  buf[6] = code & 0xFF;
+  buf[7] = (code >> 8) & 0xFF;
+  writeU32LE(buf, 8, tx);
+  payload.copy(buf, 12);
+  return buf;
+}
+
+function parseUsbContainers(bytes) {
+  const containers = [];
+  let offset = 0;
+  while (offset + 12 <= bytes.length) {
+    const length = readU32LE(bytes, offset);
+    const type = bytes[offset + 4] | (bytes[offset + 5] << 8);
+    if (length < 12 || type < 1 || type > 4 || offset + length > bytes.length) break;
+    containers.push({
+      type,
+      code: bytes[offset + 6] | (bytes[offset + 7] << 8),
+      transactionId: readU32LE(bytes, offset + 8),
+      payload: bytes.subarray(offset + 12, offset + length),
+    });
+    offset += length;
+  }
+  return containers;
+}
+
+function usbPayloadParams(payload) {
+  const params = [];
+  if (!payload?.length) return params;
+  if (payload.length <= 4) {
+    params.push(readU32LE(payload, 0));
+    return params;
+  }
+  for (let offset = 0; offset + 4 <= payload.length; offset += 4) {
+    params.push(readU32LE(payload, offset));
+  }
+  return params;
+}
+
+function sendUsbCmd(opCode, params = [], dataOut = null, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     if (!global.usbDevice) return reject(new Error('USB 未连接'));
-    const cmdBuf = Buffer.alloc(32);
-    writeU32LE(cmdBuf, 0, 12 + Math.max(params.length, 1) * 4);
-    writeU32LE(cmdBuf, 4, 1);
-    cmdBuf[8] = opCode & 0xFF;
-    cmdBuf[9] = (opCode>>8) & 0xFF;
-    writeU32LE(cmdBuf, 10, ++transactionId);
-    params.forEach((p, i) => writeU32LE(cmdBuf, 12 + i*4, p));
-    global.usbDevice.outEp.transfer(cmdBuf, (err) => {
-      if (err) return reject(err);
-      global.usbDevice.inEp.transfer(1024, (err2, data) => {
-        if (err2) return reject(err2);
-        resolve(parsePtpResp(data));
+    const { outEp, inEp } = global.usbDevice;
+    const tx = ++transactionId;
+    const paramPayload = Buffer.alloc(params.length * 4);
+    params.forEach((value, index) => writeU32LE(paramPayload, index * 4, value));
+    const command = buildUsbContainer(1, opCode, tx, paramPayload);
+    let data = Buffer.alloc(0);
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`USB PTP 命令超时 (0x${opCode.toString(16)})`));
+      }
+    }, timeoutMs);
+
+    const readResponse = (attempt = 0) => {
+      if (settled) return;
+      inEp.transfer(65536, (err, chunk) => {
+        if (settled) return;
+        if (err) {
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+          return;
+        }
+        const containers = parseUsbContainers(chunk);
+        for (const container of containers) {
+          if (container.type === 2) {
+            data = data.length ? Buffer.concat([data, container.payload]) : container.payload;
+          }
+          if (container.type === 3 && container.transactionId === tx) {
+            settled = true;
+            clearTimeout(timer);
+            resolve({
+              respCode: container.code,
+              transactionId: tx,
+              data,
+              params: usbPayloadParams(data),
+            });
+            return;
+          }
+        }
+        if (attempt < 8) readResponse(attempt + 1);
+        else {
+          settled = true;
+          clearTimeout(timer);
+          reject(new Error('USB PTP 未收到命令响应'));
+        }
       });
+    };
+
+    outEp.transfer(command, (err) => {
+      if (err) {
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+        return;
+      }
+      if (dataOut?.length) {
+        outEp.transfer(buildUsbContainer(2, opCode, tx, dataOut), (dataErr) => {
+          if (dataErr) {
+            settled = true;
+            clearTimeout(timer);
+            reject(dataErr);
+            return;
+          }
+          readResponse();
+        });
+      } else {
+        readResponse();
+      }
     });
   });
 }

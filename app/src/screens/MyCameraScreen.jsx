@@ -60,6 +60,13 @@ const GUIDES = {
 const CONNECTION_CONFIG_KEY = 'nini_connection_configs';
 const CONNECTION_PROFILES_KEY = 'nini_connection_profiles_v2';
 
+function formatLogLine(record) {
+  if (typeof record === 'string') return record;
+  const time = record?.timestamp ? new Date(record.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  const level = record?.level ? `[${record.level.toUpperCase()}]` : '';
+  return `${time} ${level} ${record?.message || JSON.stringify(record)}`.trim();
+}
+
 function loadConnectionConfigs() {
   try {
     return JSON.parse(localStorage.getItem(CONNECTION_CONFIG_KEY) || '{}') || {};
@@ -227,7 +234,7 @@ export default function MyCameraScreen() {
         }
       }),
       camera.on('error', data => setError(typeof data === 'string' ? data : data.error || JSON.stringify(data))),
-      camera.on('diagnostic', message => setLogs(items => [...items, message])),
+      camera.on('diagnostic', record => setLogs(items => [...items, record])),
       camera.on('camera_info', info => setCurrentInfo(info)),
     ];
     return () => cleanups.forEach(cleanup => typeof cleanup === 'function' && cleanup());
@@ -304,7 +311,29 @@ export default function MyCameraScreen() {
   };
 
   const copyLogs = async () => {
-    try { await navigator.clipboard.writeText(logs.join('\n')); } catch {}
+    const text = logs.map(formatLogLine).join('\n');
+    try { await navigator.clipboard.writeText(text); } catch {}
+  };
+
+  const exportDiagnostics = async () => {
+    const payload = camera.getDiagnostics();
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: '妮妮相机诊断日志', text });
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      setError('诊断日志已复制到剪贴板');
+    } catch {
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `nini-diagnostics-${Date.now()}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    }
   };
 
   const modeMeta = MODES.find(item => item.value === mode) || MODES[0];
@@ -538,10 +567,15 @@ export default function MyCameraScreen() {
             <div className="mx-4 mb-4 p-3 rounded-md bg-black/35 border border-[var(--line)] max-h-44 overflow-auto">
               {logs.length === 0
                 ? <p className="text-[10px] text-[var(--text-muted)]">暂无日志</p>
-                : logs.map((line, index) => <p key={index} className="mono text-[9px] leading-4 text-[#98c99f] break-all">{line}</p>)}
+                : logs.map((line, index) => <p key={index} className="mono text-[9px] leading-4 text-[#98c99f] break-all">{formatLogLine(line)}</p>)}
             </div>
           )}
-          {logs.length > 0 && <button className="btn btn-ghost w-full border-t border-[var(--line)] rounded-none text-[10px]" onClick={copyLogs}>复制诊断日志</button>}
+          {logs.length > 0 && (
+            <div className="grid grid-cols-2 border-t border-[var(--line)]">
+              <button className="btn btn-ghost rounded-none text-[10px]" onClick={copyLogs}>复制日志</button>
+              <button className="btn btn-ghost border-l border-[var(--line)] rounded-none text-[10px]" onClick={exportDiagnostics}>导出诊断</button>
+            </div>
+          )}
         </section>
       </div>
     </div>

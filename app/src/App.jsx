@@ -130,6 +130,7 @@ function TopBar() {
   const cfg = {
     disconnected: { cls: 'dot-gray', label: '未连接', col: 'var(--text-muted)' },
     connecting: { cls: 'dot-yellow', label: '连接中', col: 'var(--warning)' },
+    reconnecting: { cls: 'dot-yellow', label: '恢复连接', col: 'var(--warning)' },
     connected: { cls: 'dot-green', label: '已连接', col: 'var(--green)' },
     session_open: { cls: 'dot-green', label: '就绪', col: 'var(--green)' },
     error: { cls: 'dot-red', label: '错误', col: 'var(--red)' },

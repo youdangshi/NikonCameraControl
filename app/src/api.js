@@ -33,6 +33,13 @@ let mobileSessionProfile = null;
 let mobileSessionBrand = null;
 let mobileSessionModel = null;
 let demoCam = null;       // 演示相机（无真机也能跑通）
+let lastConnectRequest = null;
+let autoReconnectTimer = null;
+let autoReconnectAttempts = 0;
+let manualDisconnect = false;
+
+const MAX_DIAGNOSTIC_EVENTS = 200;
+let diagnosticEvents = [];
 
 // ─── PTP 操作码 ───────────────────────────────────────
 const OC = {
@@ -73,6 +80,66 @@ function diagnosticTransport() {
   if (mobileSessionMode === 'usb') return 'USB';
   if (mobileSessionMode) return 'PTP/IP';
   return isNativeMobile() ? '原生直连' : '本机服务';
+}
+
+function recordDiagnostic(message, level = 'info', detail = null) {
+  const record = {
+    timestamp: Date.now(),
+    level,
+    message: String(message || ''),
+    transport: diagnosticTransport(),
+    brand: mobileSessionBrand || 'unknown',
+    mode: mobileSessionMode || null,
+    detail: detail || null,
+  };
+  diagnosticEvents = [record, ...diagnosticEvents].slice(0, MAX_DIAGNOSTIC_EVENTS);
+  emit('diagnostic', record);
+}
+
+function clearAutoReconnect() {
+  if (autoReconnectTimer) {
+    clearTimeout(autoReconnectTimer);
+    autoReconnectTimer = null;
+  }
+}
+
+function scheduleAutoReconnect(reason = '连接已断开') {
+  if (manualDisconnect || !lastConnectRequest || autoReconnectTimer) return;
+  if (lastConnectRequest.mode === 'usb') {
+    recordDiagnostic('USB 会话已断开。Android 无法安全模拟重新插拔，请拔下数据线后重新连接。', 'warn');
+    return;
+  }
+  if (autoReconnectAttempts >= 2) {
+    recordDiagnostic(`${reason}，自动恢复已达到重试上限。`, 'error');
+    emit('status', { state: 'error', error: `${reason}，请检查相机无线设置后重试。` });
+    return;
+  }
+
+  autoReconnectAttempts += 1;
+  const delayMs = autoReconnectAttempts === 1 ? 1200 : 3200;
+  recordDiagnostic(`${reason}，${Math.round(delayMs / 1000)} 秒后自动恢复（${autoReconnectAttempts}/2）…`, 'warn');
+  emit('status', {
+    state: 'reconnecting',
+    mode: lastConnectRequest.mode,
+    profile: lastConnectRequest.options?.profile || null,
+  });
+  autoReconnectTimer = setTimeout(async () => {
+    autoReconnectTimer = null;
+    if (manualDisconnect || !lastConnectRequest) return;
+    const request = lastConnectRequest;
+    const result = await camera.connectCamera(
+      request.mode,
+      request.host,
+      request.port,
+      request.options,
+    ).catch(error => ({ success: false, error: error?.message || String(error) }));
+    if (result?.success) {
+      autoReconnectAttempts = 0;
+      recordDiagnostic('相机连接已自动恢复。', 'success');
+    } else {
+      scheduleAutoReconnect(result?.error || reason);
+    }
+  }, delayMs);
 }
 
 function explicitBrand(brandId) {
@@ -456,6 +523,10 @@ export const camera = {
   async connectCamera(mode, host, port, options = {}) {
     mode = mode || 'wifi';
     port = port || 15740;
+    clearAutoReconnect();
+    manualDisconnect = false;
+    lastConnectRequest = { mode, host, port, options: { ...options }, timestamp: Date.now() };
+    recordDiagnostic(`开始连接：${mode}${host ? ` · ${host}:${port}` : ''}`);
     const profile = mode === 'sta' ? (options.profile === 'device' ? 'device' : 'pc') : null;
     const brand = options.brand || 'auto';
 
@@ -488,7 +559,7 @@ export const camera = {
     host = String(host || '192.168.1.1').trim();
     port = Number.parseInt(port, 10) || 15740;
     emit('status', { state: 'connecting', mode, profile, host, port, direct: true });
-    const diag = msg => emit('diagnostic', msg);
+    const diag = (msg, level = 'info') => recordDiagnostic(msg, level);
     let session = null;
     try {
       const selectedBrand = explicitBrand(requestedBrand);
@@ -504,6 +575,7 @@ export const camera = {
         mobileSessionModel = null;
         emit('status', { state: 'error', mode, profile, host, port, error: message, direct: true });
         emit('error', { error: message, direct: true });
+        scheduleAutoReconnect(message || '相机连接已断开');
       }, { clientName });
       mobileSession = session;
       mobileSessionMode = mode;
@@ -541,6 +613,8 @@ export const camera = {
           : 'WiFi',
         ip: host,
       });
+      autoReconnectAttempts = 0;
+      recordDiagnostic(`连接成功：${mode}${host ? ` · ${host}:${port}` : ''}`, 'success');
       return { success: true, model, brand: brand.id, brandLabel: brand.label };
     } catch (e) {
       const rawError = e?.message || String(e);
@@ -558,7 +632,7 @@ export const camera = {
   /** 手机 App：Type-C / OTG 原生 USB 直连 */
   async connectUsbDirect(requestedBrand = 'auto') {
     emit('status', { state: 'connecting', mode: 'usb', direct: true });
-    const diag = msg => emit('diagnostic', msg);
+    const diag = (msg, level = 'info') => recordDiagnostic(msg, level);
     try {
       const session = await openUsbSession(diag);
       const brand = explicitBrand(requestedBrand) || CAMERA_BRANDS.nikon;
@@ -577,6 +651,8 @@ export const camera = {
         connection: 'USB',
         ip: 'USB',
       });
+      autoReconnectAttempts = 0;
+      recordDiagnostic('USB 相机连接成功。', 'success');
       return { success: true, model: mobileSessionModel, brand: brand.id, brandLabel: brand.label };
     } catch (e) {
       emit('status', { state: 'error', mode: 'usb', error: e.message || String(e) });
@@ -587,6 +663,10 @@ export const camera = {
 
   /** 断开 */
   async disconnect() {
+    manualDisconnect = true;
+    clearAutoReconnect();
+    autoReconnectAttempts = 0;
+    recordDiagnostic('用户主动断开相机连接。');
     if (demoCam) { try { await demoCam.disconnect(); } catch {} demoCam = null; }
     if (mobileSession) {
       try { await mobileSession.close(); } catch {}
@@ -818,7 +898,7 @@ export const camera = {
       if (typeof mobileSession.waitForDeviceReady === 'function') {
         const readiness = await mobileSession.waitForDeviceReady(4500);
         if (!readiness?.ready) {
-          emit('diagnostic', `Nikon DeviceReady 未确认${readiness?.code ? `（PTP 0x${Number(readiness.code).toString(16)}）` : ''}，继续尝试读取取景帧`);
+          recordDiagnostic(`Nikon DeviceReady 未确认${readiness?.code ? `（PTP 0x${Number(readiness.code).toString(16)}）` : ''}，继续尝试读取取景帧`, 'warn');
         }
       }
       return { success: true };
@@ -1010,6 +1090,28 @@ export const camera = {
   onPropertyDiagnostic: (fn) => on('property:diagnostic', fn),
   getPropertyDiagnostics: () => propertyDiagnostics.slice(),
   clearPropertyDiagnostics() {
+    propertyDiagnostics = [];
+    emit('property:diagnostic:clear');
+  },
+  getDiagnostics() {
+    return {
+      generatedAt: new Date().toISOString(),
+      platform: isNativeMobile() ? 'android-native' : 'web',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      session: {
+        mode: mobileSessionMode,
+        profile: mobileSessionProfile,
+        brand: mobileSessionBrand,
+        model: mobileSessionModel,
+        connected: Boolean(mobileSession),
+      },
+      lastConnectRequest,
+      events: diagnosticEvents.slice(),
+      propertyEvents: propertyDiagnostics.slice(),
+    };
+  },
+  clearDiagnostics() {
+    diagnosticEvents = [];
     propertyDiagnostics = [];
     emit('property:diagnostic:clear');
   },

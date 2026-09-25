@@ -6,6 +6,7 @@ import {
   Bot, Cable, Camera, Check, Info, KeyRound, Palette, Save, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 import { getNikonModelCatalog } from '../nikonModels.js';
+import { getAdapterCatalog } from '../cameraAdapters.js';
 
 function Section({ icon: Icon, title, description, children }) {
   return (
@@ -129,9 +130,25 @@ export default function SettingsScreen() {
 
         <Section icon={Info} title="关于妮妮" description="Android 相机控制与修图应用">
           <div className="space-y-2 text-[10px] text-[var(--text-soft)]">
-            <div className="flex justify-between"><span>版本</span><span className="mono">1.6.0</span></div>
+            <div className="flex justify-between"><span>版本</span><span className="mono">1.7.0</span></div>
             <div className="flex justify-between"><span>相机协议</span><span className="mono">PTP / PTP-IP</span></div>
             <div className="flex justify-between"><span>图像处理</span><span>本地画布引擎</span></div>
+          </div>
+        </Section>
+
+        <Section icon={Cable} title="品牌协议适配" description="按品牌隔离厂商命令和未验证能力">
+          <div className="space-y-2">
+            {getAdapterCatalog().map(adapter => (
+              <div key={adapter.id} className="flex items-start justify-between gap-3 rounded-md border border-[var(--line)] bg-black/20 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold">{adapter.label}</p>
+                  <p className="text-[9px] leading-4 text-[var(--text-muted)] mt-1">{adapter.reference}</p>
+                </div>
+                <span className={`text-[9px] flex-shrink-0 ${adapter.vendorCommandsEnabled ? 'text-[var(--green)]' : 'text-[var(--warning)]'}`}>
+                  {adapter.vendorCommandsEnabled ? '厂商命令已启用' : '仅通用 PTP'}
+                </span>
+              </div>
+            ))}
           </div>
         </Section>
       </div>

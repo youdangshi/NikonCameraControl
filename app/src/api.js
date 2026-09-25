@@ -684,7 +684,7 @@ export const camera = {
 
   /** 读取相机声明的属性能力、当前值和可调范围 */
   async getPropDesc(propCode) {
-    if (!mobileSession) return { responseCode: null, unsupported: true };
+    if (!mobileSession) return fetchJSON('POST', '/api/prop/desc', { propCode });
     const startedAt = nowMs();
     try {
       const resp = await mobileSession.command(OC.GetDevicePropDesc, [propCode], 8000);

@@ -62,6 +62,63 @@ function readU32BE(data, offset) {
 const UINT16_PROPS = new Set([0x5005, 0x5007, 0x500A, 0x500B, 0x500E, 0x500F, 0x5013]);
 const UINT8_PROPS = new Set([0xD10B, 0xD1A6, 0xD1F0]);
 
+function readU16LE(data, offset) {
+  return data[offset] | (data[offset + 1] << 8);
+}
+
+function readPropDescValue(data, offset, dataType) {
+  switch (Number(dataType)) {
+    case 0x0001: return { value: data.readInt8(offset), next: offset + 1 };
+    case 0x0002: return { value: data.readUInt8(offset), next: offset + 1 };
+    case 0x0003: return { value: data.readInt16LE(offset), next: offset + 2 };
+    case 0x0004: return { value: data.readUInt16LE(offset), next: offset + 2 };
+    case 0x0005: return { value: data.readInt32LE(offset), next: offset + 4 };
+    case 0x0006: return { value: data.readUInt32LE(offset), next: offset + 4 };
+    case 0x0007: return { value: Number(data.readBigInt64LE(offset)), next: offset + 8 };
+    case 0x0008: return { value: Number(data.readBigUInt64LE(offset)), next: offset + 8 };
+    default: throw new Error('Unsupported PTP property data type');
+  }
+}
+
+function parseDevicePropDescData(payload) {
+  if (!payload || payload.length < 11) throw new Error('PTP property descriptor too short');
+  const data = Buffer.from(payload);
+  const propertyCode = readU16LE(data, 0);
+  const dataType = readU16LE(data, 2);
+  const getSet = data[4];
+  let offset = 5;
+  const defaultValue = readPropDescValue(data, offset, dataType);
+  offset = defaultValue.next;
+  const currentValue = readPropDescValue(data, offset, dataType);
+  offset = currentValue.next;
+  const formFlag = data[offset++];
+  const result = {
+    propertyCode,
+    dataType,
+    getSet,
+    defaultValue: defaultValue.value,
+    currentValue: currentValue.value,
+    formFlag,
+    form: 'none',
+  };
+  if (formFlag === 0x01) {
+    const minimum = readPropDescValue(data, offset, dataType); offset = minimum.next;
+    const maximum = readPropDescValue(data, offset, dataType); offset = maximum.next;
+    const step = readPropDescValue(data, offset, dataType);
+    return { ...result, form: 'range', minimum: minimum.value, maximum: maximum.value, step: step.value };
+  }
+  if (formFlag === 0x02) {
+    const count = readU16LE(data, offset); offset += 2;
+    const values = [];
+    for (let index = 0; index < count; index += 1) {
+      const item = readPropDescValue(data, offset, dataType);
+      values.push(item.value);
+      offset = item.next;
+    }
+    return { ...result, form: 'enumeration', values };
+  }
+  return result;
+}
 function decodeNikonProp(propCode, bytesOrValue) {
   if (Buffer.isBuffer(bytesOrValue) || bytesOrValue instanceof Uint8Array) {
     const bytes = Buffer.from(bytesOrValue);
@@ -411,6 +468,14 @@ function handleHTTP(req, res) {
           value: decodeNikonProp(json.propCode, rawValue || 0),
           code: resp?.respCode ?? null,
         };
+      } else if (url === '/api/prop/desc' && method === 'POST') {
+        if (connectionMode !== 'usb') {
+          result = { responseCode: null, unsupported: true };
+        } else {
+          const resp = await sendUsbCmd(0x1014, [json.propCode]);
+          const descriptor = resp?.respCode === 0x2001 ? parseDevicePropDescData(resp.data) : null;
+          result = { ...(descriptor || {}), responseCode: resp?.respCode ?? null };
+        }
       } else if (url === '/api/prop/set' && method === 'POST') {
         const resp = connectionMode === 'wifi'
           ? await sendPtpCmd(0x1016, [json.propCode, json.value])

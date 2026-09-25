@@ -349,19 +349,25 @@ function usbConnect() {
       // 发送标准 USB PTP OpenSession
       setTimeout(async () => {
         try {
-          const drained = await drainUsbInput(inEp, 350);
-          if (drained > 0) broadcast('usb_diag', `已清理 USB 残留数据 ${drained} 字节`);
           transactionId = 0;
           const resp = await sendUsbCmd(0x1002, [1]);
           if (resp && (resp.respCode === 0x2001 || resp.respCode === 0x201E)) {
             sessionId = 1;
+            await prepareNikonUsbSession(inEp);
             broadcast('status', { state: 'session_open', mode: 'usb' });
             broadcast('camera_info', { model: 'Nikon Z30', connection: 'USB' });
             resolve(true);
           } else {
             reject(new Error(`USB OpenSession failed: 0x${Number(resp?.respCode || 0).toString(16)}`));
           }
-        } catch (err) { reject(err); }
+        } catch (err) {
+          try { iface.release(true, () => {}); } catch {}
+          try { nikonDev.close(); } catch {}
+          global.usbDevice = null;
+          connectionMode = null;
+          sessionId = 0;
+          reject(err);
+        }
       }, 300);
     } catch (err) {
       if (err.code === 'MODULE_NOT_FOUND') {
@@ -479,30 +485,53 @@ function handleHTTP(req, res) {
       } else if (url === '/api/prop/set' && method === 'POST') {
         const resp = connectionMode === 'wifi'
           ? await sendPtpCmd(0x1016, [json.propCode, json.value])
-          : await sendUsbCmd(0x1016, [json.propCode], 8000, encodeNikonProp(json.propCode, json.value));
+          : await sendUsbCmd(0x1016, [json.propCode], encodeNikonProp(json.propCode, json.value), 8000);
         result = { success: resp && resp.respCode === 0x2001, code: resp?.respCode ?? null };
       } else if (url === '/api/liveview/start' && method === 'POST') {
-        const resp = connectionMode === 'wifi'
-          ? await sendPtpCmd(0x9201)
-          : await sendUsbCmd(0x9201);
-        result = { success: true };
+        let success = false;
+        let code = null;
+        if (connectionMode === 'wifi') {
+          const resp = await sendPtpCmd(0x9201);
+          code = resp?.respCode ?? null;
+          success = code === 0x2001 || code === 0x201e;
+        } else {
+          success = await startNikonUsbLiveView();
+          code = success ? 0x2001 : null;
+        }
+        result = { success, code };
+        if (!success) throw new Error(`启动实时取景失败${code == null ? '' : `: PTP 0x${Number(code).toString(16)}`}`);
         broadcast('liveview', { running: true });
       } else if (url === '/api/liveview/stop' && method === 'POST') {
-        try { await sendPtpCmd(0x9202); } catch {}
+        try {
+          if (connectionMode === 'wifi') await sendPtpCmd(0x9202);
+          else if (connectionMode === 'usb') await sendUsbCmd(0x9202, [], null, 4000);
+        } catch {}
         result = { success: true };
         broadcast('liveview', { running: false });
       } else if (url === '/api/liveview/frame' && method === 'GET') {
         try {
-          const resp = connectionMode === 'wifi'
-            ? await sendPtpCmd(0x9203)
-            : await sendUsbCmd(0x9203);
-          if (connectionMode === 'usb' && resp?.data?.length) {
-            result = { frame: resp.data.toString('base64'), size: resp.data.length };
-          } else if (resp && resp.params[0] > 0) {
-            const data = await receiveData(resp.params[0]);
-            result = { frame: data.toString('base64'), size: resp.params[0] };
-          } else { result = { frame: null }; }
-        } catch { result = { frame: null }; }
+          if (connectionMode === 'usb') {
+            const resp = await sendUsbCmd(0x9203, [], null, 12000);
+            if (resp.respCode !== 0x2001) {
+              result = { frame: null, code: resp.respCode };
+            } else {
+              const data = extractJpegPayload(resp.data);
+              result = data.length
+                ? { frame: data.toString('base64'), size: data.length }
+                : { frame: null, code: resp.respCode };
+            }
+          } else {
+            const resp = await sendPtpCmd(0x9203);
+            if (resp && resp.params[0] > 0) {
+              const data = extractJpegPayload(await receiveData(resp.params[0]));
+              result = { frame: data.toString('base64'), size: data.length };
+            } else {
+              result = { frame: null, code: resp?.respCode ?? null };
+            }
+          }
+        } catch (error) {
+          result = { frame: null, error: error.message };
+        }
       } else if (url === '/api/autofocus' && method === 'POST') {
         const resp = connectionMode === 'wifi'
           ? await sendPtpCmd(0x9205, [0x0001])
@@ -592,6 +621,12 @@ function parseUsbContainers(bytes) {
   return containers;
 }
 
+function extractJpegPayload(data) {
+  if (!data?.length) return Buffer.alloc(0);
+  const start = data.indexOf(Buffer.from([0xff, 0xd8]));
+  return start >= 0 ? data.subarray(start) : data;
+}
+
 function usbPayloadParams(payload) {
   const params = [];
   if (!payload?.length) return params;
@@ -649,7 +684,7 @@ function sendUsbCmd(opCode, params = [], dataOut = null, timeoutMs = 8000) {
             return;
           }
         }
-        if (attempt < 8) readResponse(attempt + 1);
+        if (attempt < 32) readResponse(attempt + 1);
         else {
           settled = true;
           clearTimeout(timer);
@@ -680,6 +715,60 @@ function sendUsbCmd(opCode, params = [], dataOut = null, timeoutMs = 8000) {
       }
     });
   });
+}
+
+async function prepareNikonUsbSession(inEp) {
+  const drained = await drainUsbInput(inEp, 350);
+  inEp.timeout = 0;
+  if (drained > 0) broadcast('usb_diag', `已清理 USB 残留数据 ${drained} 字节`);
+
+  const info = await sendUsbCmd(0x1001, [], null, 8000);
+  if (info.respCode !== 0x2001) {
+    throw new Error(`GetDeviceInfo 失败: 0x${Number(info.respCode || 0).toString(16)}`);
+  }
+  broadcast('usb_diag', `GetDeviceInfo 成功，收到 ${info.data.length} 字节`);
+
+  // Vendor commands are only enabled reliably after the device-info exchange.
+  try {
+    const appMode = await sendUsbCmd(0x9435, [1], null, 2500);
+    broadcast('usb_diag', `ChangeApplicationMode: 0x${Number(appMode.respCode || 0).toString(16)}`);
+  } catch (error) {
+    broadcast('usb_diag', `ChangeApplicationMode 不可用: ${error.message}`);
+  }
+
+  try {
+    await sendUsbCmd(0x90c8, [], null, 2500);
+  } catch (error) {
+    broadcast('usb_diag', `DeviceReady 握手未确认: ${error.message}`);
+  }
+  return info.data.length;
+}
+
+async function startNikonUsbLiveView() {
+  let response = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    response = await sendUsbCmd(0x9201, [], null, 12000);
+    if (response.respCode === 0x2001 || response.respCode === 0x201e) break;
+    if (response.respCode !== 0x2019) break;
+    await new Promise(resolve => setTimeout(resolve, 220));
+  }
+
+  const success = response?.respCode === 0x2001 || response?.respCode === 0x201e;
+  if (!success) {
+    broadcast('usb_diag', `StartLiveView: 0x${Number(response?.respCode || 0).toString(16)}`);
+    return success;
+  }
+
+  // StartLiveView is asynchronous on Nikon bodies. DeviceReady confirms that
+  // the live-view sensor is ready before the first GetLiveViewImage request.
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 200));
+    try {
+      const ready = await sendUsbCmd(0x90c8, [], null, 1800);
+      if (ready.respCode === 0x2001) break;
+    } catch {}
+  }
+  return true;
 }
 
 function receiveData(size) {

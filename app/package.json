@@ -46,7 +46,9 @@
     },
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "main-process/**/*",
+      "server.cjs",
+      "package.json"
     ],
     "win": {
       "target": [

@@ -10,6 +10,15 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const net = require('net');
 
+// 打包版启动本地 API / WebSocket / 静态文件服务。
+if (!process.argv.includes('--dev')) {
+  try {
+    require(path.join(__dirname, '..', 'server.cjs'));
+  } catch (error) {
+    console.error('[妮妮] 本地服务启动失败:', error);
+  }
+}
+
 // 调试：检查 electron 模块
 if (!app) {
   console.error('ERROR: electron.app is undefined!');
@@ -311,7 +320,7 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5174');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    mainWindow.loadURL('http://127.0.0.1:19570');
   }
 
   mainWindow.once('ready-to-show', () => mainWindow.show());

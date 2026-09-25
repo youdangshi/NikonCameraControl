@@ -81,6 +81,8 @@ Thumbs.db
 Desktop.ini
 
 # ── 本机真机调试截图与 UI 层级（禁止上传） ──────────────────
+dist-exe/
+.tmp-*
 nini-*.png
 nini-*.xml
 lv1.png

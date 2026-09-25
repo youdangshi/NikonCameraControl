@@ -4,7 +4,7 @@
 
 妮妮通过 USB Type-C、相机 WiFi 热点或 STA 局域网连接相机，在手机上完成实时取景、曝光参数控制、自动对焦、遥控拍摄、相机照片读取和本地修图。项目重点解决 Nikon Z30 真机控制链路，并为后续多机型、多品牌适配建立独立协议层。
 
-> 当前版本：`v1.8.0`
+> 当前版本：`v1.9.0`
 > <br>
 > 真机验证设备：Nikon Z30 + Redmi M2011K2C（Android 13）
 > <br>
@@ -62,6 +62,16 @@
 - Nikon Flexible Color Picture Control（`.NP3`）导入和近似预览。
 - 风光、夜景、星空、建筑、桥梁、美食、胶片、日系、黑白和电影预设。
 
+### AI 诊断
+
+- 即使没有配置 API Key，也会先进行本地图像诊断。
+- 分析平均亮度、动态范围、高光/暗部压缩、白平衡偏色、饱和度和边缘清晰度。
+- 支持自动、人像、风光、夜景、星空、建筑、美食、街拍和胶片模式。
+- 支持 OpenAI、DeepSeek 或其他 OpenAI 兼容接口。
+- 视觉模型会检查主体、光线、构图、肤色、景深和题材。
+- 模型输出经过 JSON 解析和参数白名单校验后才能进入修图器。
+- 每条建议显示具体参数，可单独应用、一键全部应用，并可撤销。
+
 ## 真实验证状态
 
 | 能力 | Nikon Z30 | 状态说明 |
@@ -80,9 +90,9 @@
 
 https://github.com/youdangshi/NikonCameraControl/releases/latest
 
-当前 `v1.8.0` 安装包：
+当前 `v1.9.0` 安装包：
 
-https://github.com/youdangshi/NikonCameraControl/releases/download/v1.8.0/Nini-1.8.0-debug.apk
+https://github.com/youdangshi/NikonCameraControl/releases/download/v1.9.0/Nini-1.9.0-debug.apk
 
 要求：
 

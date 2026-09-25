@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { AppContext } from '../App.jsx';
 import {
   STYLE_PRESETS, PORTRAIT_STEPS, GENRE_GUIDE,
   DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK, DEFAULT_WHEELS, DEFAULT_CHANNEL_CURVES,
@@ -7,6 +8,8 @@ import {
 import { renderPreview, exportEdited, loadImage, parseCubeLut, buildChannelCurveLut } from '../editor/imageEngine.js';
 import { parseNp3 } from '../editor/np3.js';
 import HistogramChart from '../components/HistogramChart.jsx';
+import AiAnalysisPanel from '../components/AiAnalysisPanel.jsx';
+import { AI_MODES, analyzePhoto, mergeRecommendations } from '../ai.js';
 import { HISTOGRAM_BINS } from '../histogram.js';
 import {
   ArrowLeft, BookOpen, Check, CloudSun, Download, ImageOff, Palette, RotateCcw, ScanLine,
@@ -20,6 +23,7 @@ const TABS = [
   { id: 'mask', label: '局部蒙版', Icon: ScanLine },
   { id: 'nikon', label: '尼康云创', Icon: CloudSun },
   { id: 'presets', label: '风格预设', Icon: Sparkles },
+  { id: 'ai', label: 'AI 诊断', Icon: Sparkles },
   { id: 'guide', label: '修图指南', Icon: BookOpen },
 ];
 
@@ -334,6 +338,7 @@ function clampValue(value) {
 export default function EditorScreen() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { state: appState } = useContext(AppContext);
   const stateSrc = location.state?.src;
   const stateName = location.state?.name || '未命名照片';
   const [source, setSource] = useState(stateSrc || '');
@@ -372,6 +377,10 @@ export default function EditorScreen() {
   const historyRef = useRef([]);
   const historyIndexRef = useRef(-1);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [aiMode, setAiMode] = useState('auto');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiError, setAiError] = useState('');
 
   const currentSnapshot = () => ({
     adj, portrait, mask, wheels, lut, lutStrength, np3Preset, channelCurves,
@@ -669,6 +678,41 @@ export default function EditorScreen() {
     setAdj({ ...DEFAULT_ADJ, ...scaled });
     setMsg(`已应用「${preset.name}」· ${quickStrength}%`);
   };
+
+  const runAiAnalysis = async () => {
+    const image = preview || source;
+    if (!image) return;
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const result = await analyzePhoto(
+        { apiKey: appState.aiApiKey, settings: appState.aiSettings },
+        '',
+        image,
+        { mode: aiMode },
+      );
+      setAiResult(result);
+      setMsg(result.usedVision ? 'AI 视觉分析完成' : '照片诊断完成');
+    } catch (error) {
+      setAiError(error?.message || String(error));
+      setMsg('AI 分析失败');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const applyAiRecommendations = (recommendations) => {
+    if (!recommendations?.length) return;
+    setAdj(current => mergeRecommendations(current, recommendations));
+    setMsg(`已应用 ${recommendations.length} 个 AI 修图步骤`);
+  };
+
+  useEffect(() => {
+    const incoming = location.state?.aiAnalysis;
+    if (incoming?.analysis) setAiResult(incoming);
+    // Imported analysis is intentionally consumed once for this photo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pointFromPointer = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1096,6 +1140,40 @@ export default function EditorScreen() {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {tab === 'ai' && (
+            <div className="space-y-3 pb-4">
+              <div className="panel p-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-[var(--accent-soft)] border border-[rgba(255,212,0,.24)] flex items-center justify-center flex-shrink-0">
+                    <Sparkles size={18} className="text-[var(--accent)]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold">AI 修图分析</p>
+                    <p className="text-[9px] leading-4 text-[var(--text-muted)] mt-1">
+                      先做本地直方图诊断，再由支持视觉的模型检查题材、光线、构图和肤色。所有建议仅在点击后应用，并可撤销。
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <select className="select flex-1" value={aiMode} onChange={event => setAiMode(event.target.value)} disabled={aiLoading}>
+                    {AI_MODES.map(mode => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
+                  </select>
+                  <button className="btn btn-primary px-4" onClick={runAiAnalysis} disabled={!source || aiLoading}>
+                    <Sparkles size={15} /> {aiLoading ? '分析中' : '开始分析'}
+                  </button>
+                </div>
+                {!appState.aiApiKey && <p className="text-[9px] text-[var(--warning)] mt-2">未配置 API Key，将使用本地图像诊断；配置后可使用视觉模型补充题材和构图判断。</p>}
+                {aiError && <p className="text-[9px] text-[var(--red)] mt-2">{aiError}</p>}
+              </div>
+
+              <AiAnalysisPanel
+                result={aiResult}
+                onApply={applyAiRecommendations}
+                onApplyOne={recommendation => applyAiRecommendations([recommendation])}
+              />
             </div>
           )}
 

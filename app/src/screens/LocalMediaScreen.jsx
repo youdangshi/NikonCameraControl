@@ -2,6 +2,7 @@ import React, { useContext, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App.jsx';
 import { analyzePhoto } from '../ai.js';
+import AiAnalysisPanel from '../components/AiAnalysisPanel.jsx';
 import { FileImage, ImagePlus, SlidersHorizontal, Sparkles, Trash2, Upload } from 'lucide-react';
 
 export default function LocalMediaScreen() {
@@ -12,6 +13,7 @@ export default function LocalMediaScreen() {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [aiError, setAiError] = useState('');
 
   const pick = (event) => {
     const file = event.target.files?.[0];
@@ -22,6 +24,7 @@ export default function LocalMediaScreen() {
       setItems(previous => [item, ...previous]);
       setSelected(item);
       setResult(null);
+      setAiError('');
     };
     reader.readAsDataURL(file);
     event.target.value = '';
@@ -31,15 +34,17 @@ export default function LocalMediaScreen() {
     if (!selected) return;
     setLoading(true);
     setResult(null);
+    setAiError('');
     try {
-      const text = await analyzePhoto(
+      const analysisResult = await analyzePhoto(
         { apiKey: state.aiApiKey, settings: state.aiSettings },
-        '请分析这张照片的曝光、色彩、构图和人物姿势，用中文给出简短、专业、可执行的后期建议，100字以内。',
+        '',
         selected.dataUrl,
+        { mode: 'auto' },
       );
-      setResult(text);
+      setResult(analysisResult);
     } catch (e) {
-      setResult(`分析失败：${e.message || String(e)}`);
+      setAiError(`分析失败：${e.message || String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -73,7 +78,7 @@ export default function LocalMediaScreen() {
                 key={`${item.name}-${index}`}
                 type="button"
                 className={`relative aspect-square overflow-hidden rounded-md bg-[#0e1113] border ${selected === item ? 'border-[var(--accent)]' : 'border-[var(--line)]'}`}
-                onClick={() => { setSelected(item); setResult(null); }}
+                onClick={() => { setSelected(item); setResult(null); setAiError(''); }}
               >
                 <img src={item.dataUrl} className="w-full h-full object-cover" alt={item.name} />
               </button>
@@ -109,7 +114,34 @@ export default function LocalMediaScreen() {
               <button className="btn btn-secondary" onClick={() => navigate('/editor', { state: { src: selected.dataUrl, name: selected.name } })}><SlidersHorizontal size={15} /> 修图</button>
               <button className="btn btn-secondary" onClick={() => { setSelected(null); setResult(null); }}><FileImage size={15} /> 收起</button>
             </div>
-            {result && <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap rounded-md border border-[var(--line)] bg-black/25 p-3 text-[10px] leading-5 text-[var(--text-soft)]">{result}</pre>}
+            {aiError && <p className="mt-3 rounded-md border border-red-400/25 bg-red-950/35 px-3 py-2 text-[10px] leading-4 text-red-100">{aiError}</p>}
+            {result && (
+              <div className="mt-3 max-h-[48vh] overflow-y-auto rounded-md border border-[var(--line)] bg-black/15 p-3">
+                <AiAnalysisPanel
+                  result={result}
+                  onApply={recommendations => navigate('/editor', {
+                    state: {
+                      src: selected.dataUrl,
+                      name: selected.name,
+                      aiAnalysis: {
+                        ...result,
+                        analysis: { ...result.analysis, recommendations },
+                      },
+                    },
+                  })}
+                  onApplyOne={recommendation => navigate('/editor', {
+                    state: {
+                      src: selected.dataUrl,
+                      name: selected.name,
+                      aiAnalysis: {
+                        ...result,
+                        analysis: { ...result.analysis, recommendations: [recommendation] },
+                      },
+                    },
+                  })}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}

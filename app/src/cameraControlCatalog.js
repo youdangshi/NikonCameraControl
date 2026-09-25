@@ -3,6 +3,7 @@ import {
   exposureTimeMicrosToLabel,
   fNumberLabel,
   nikonExposureRawToMicros,
+  shutterLabelToMicros,
 } from './nikonProperties.js';
 
 export const ISO_VALUES = [100,125,160,200,250,320,400,500,640,800,1000,1250,1600,2000,2500,3200,4000,5000,6400,8000,10000,12800,16000,20000,25600,32000,40000,51200];
@@ -43,28 +44,29 @@ export function buildControlCatalog(descriptors = {}) {
   const apertureFromCamera = descriptorOptions(apertureDesc);
   const shutterRawFromCamera = descriptorOptions(shutterDesc);
 
-  const isoOptions = unique(isoFromCamera || knownValuesInRange(ISO_VALUES, isoDesc));
+  const parseAperture = label => Number(String(label).replace(/^F/i, '')) * 100;
+  const sortNumeric = values => unique(values.map(Number).filter(Number.isFinite)).sort((a, b) => a - b);
+  const sortShutter = values => unique(values).sort((a, b) => shutterLabelToMicros(a) - shutterLabelToMicros(b));
+  const isoOptions = sortNumeric(isoFromCamera || knownValuesInRange(ISO_VALUES, isoDesc));
   const apertureOptions = unique(
     (apertureFromCamera || knownValuesInRange(APERTURE_LABELS.map(label => Number(label.slice(1)) * 100), apertureDesc))
       .map(raw => fNumberLabel(raw)),
-  );
-  const shutterOptions = unique(
+  ).sort((a, b) => parseAperture(a) - parseAperture(b));
+  const shutterOptions = sortShutter(
     (shutterRawFromCamera || [])
-      .map(raw => exposureTimeMicrosToLabel(nikonExposureRawToMicros(raw)))
+      .map(raw => nikonExposureRawToMicros(raw))
+      .filter(micros => micros >= 200 && micros <= 30_000_000)
+      .map(micros => exposureTimeMicrosToLabel(micros))
       .filter(label => label !== '--')
       .concat(SHUTTER_LABELS),
-  ).sort((a, b) => {
-    const indexA = SHUTTER_LABELS.indexOf(a);
-    const indexB = SHUTTER_LABELS.indexOf(b);
-    if (indexA >= 0 && indexB >= 0) return indexA - indexB;
-    if (indexA >= 0) return -1;
-    if (indexB >= 0) return 1;
-    return 0;
-  });
+  );
+  const shutterRange = shutterOptions.length
+    ? `${shutterOptions[shutterOptions.length - 1]}–${shutterOptions[0]}`
+    : '';
 
   const summary = [];
   if (isoOptions.length) summary.push({ label: 'ISO', count: isoOptions.length, range: `${isoOptions[0]}–${isoOptions[isoOptions.length - 1]}` });
-  if (shutterOptions.length) summary.push({ label: '快门', count: shutterOptions.length, range: `${shutterOptions[0]}–${shutterOptions[shutterOptions.length - 1]}` });
+  if (shutterOptions.length) summary.push({ label: '快门', count: shutterOptions.length, range: shutterRange });
   if (apertureOptions.length) summary.push({ label: '光圈', count: apertureOptions.length, range: `${apertureOptions[0]}–${apertureOptions[apertureOptions.length - 1]}` });
 
   return {

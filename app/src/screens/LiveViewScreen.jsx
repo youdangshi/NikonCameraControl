@@ -258,7 +258,7 @@ export default function LiveViewScreen() {
   }, [connected]);
 
   useEffect(() => {
-    if (!connected) return undefined;
+    if (!connected || panelOpen) return undefined;
     let cancelled = false;
     let timer = null;
 
@@ -298,7 +298,7 @@ export default function LiveViewScreen() {
     }).catch(() => {});
     sync();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [connected]);
+  }, [connected, panelOpen]);
 
   useEffect(() => () => {
     mountedRef.current = false;
@@ -400,7 +400,11 @@ export default function LiveViewScreen() {
     try {
       const result = await camera.setProp(propCode, value);
       if (!result?.success) {
-        setQuickError(`${label}写入失败：PTP ${result?.code != null ? `0x${Number(result.code).toString(16)}` : '无响应'}`);
+        if (result?.code === 0x200F && /^U[123]$/.test(quick.expMode)) {
+          setQuickError(`当前是 ${quick.expMode} 用户模式，相机不允许远程修改曝光参数。请先切到 M、A、S 或 P。`);
+        } else {
+          setQuickError(`${label}写入失败：PTP ${result?.code != null ? `0x${Number(result.code).toString(16)}` : '无响应'}`);
+        }
         return false;
       }
       if (result.verified === false) {

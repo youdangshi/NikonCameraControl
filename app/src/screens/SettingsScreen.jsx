@@ -3,8 +3,9 @@ import { AppContext } from '../App.jsx';
 import { AI_PROVIDERS } from '../ai.js';
 import { POSE_ITEMS } from '../components/PoseLibrary.jsx';
 import {
-  Bot, Cable, Check, Info, KeyRound, Palette, Save, SlidersHorizontal, UserRound,
+  Bot, Cable, Camera, Check, Info, KeyRound, Palette, Save, SlidersHorizontal, UserRound,
 } from 'lucide-react';
+import { getNikonModelCatalog } from '../nikonModels.js';
 
 function Section({ icon: Icon, title, description, children }) {
   return (
@@ -76,6 +77,22 @@ export default function SettingsScreen() {
           </div>
         </Section>
 
+        <Section icon={Camera} title="Nikon 机型能力" description="已验证机型和保守兼容范围">
+          <div className="space-y-2">
+            {getNikonModelCatalog().filter(model => model.id !== 'nikon-generic').map(model => (
+              <div key={model.id} className="rounded-md border border-[var(--line)] bg-black/20 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-semibold">{model.label}</span>
+                  <span className={`text-[9px] ${model.status === 'verified' ? 'text-[var(--green)]' : 'text-[var(--warning)]'}`}>
+                    {model.status === 'verified' ? '已真机验证' : '实验适配'}
+                  </span>
+                </div>
+                <p className="text-[9px] leading-4 text-[var(--text-muted)] mt-1">{model.notes}</p>
+              </div>
+            ))}
+          </div>
+        </Section>
+
         <Section icon={UserRound} title="人像姿势框线" description="在实时取景中叠加人物姿态参考">
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px]">启用姿势框线</span>
@@ -112,7 +129,7 @@ export default function SettingsScreen() {
 
         <Section icon={Info} title="关于妮妮" description="Android 相机控制与修图应用">
           <div className="space-y-2 text-[10px] text-[var(--text-soft)]">
-            <div className="flex justify-between"><span>版本</span><span className="mono">1.4.5</span></div>
+            <div className="flex justify-between"><span>版本</span><span className="mono">1.6.0</span></div>
             <div className="flex justify-between"><span>相机协议</span><span className="mono">PTP / PTP-IP</span></div>
             <div className="flex justify-between"><span>图像处理</span><span>本地画布引擎</span></div>
           </div>

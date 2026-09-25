@@ -64,7 +64,7 @@ export default function LiveViewScreen() {
   const { state, updatePoseGuides } = useContext(AppContext);
   const navigate = useNavigate();
   const [lvOn, setLvOn] = useState(false);
-  const [frame, setFrame] = useState(null);
+  const [hasFrame, setHasFrame] = useState(false);
   const [captured, setCaptured] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [lvError, setLvError] = useState('');
@@ -84,6 +84,9 @@ export default function LiveViewScreen() {
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const lvRef = useRef(null);
   const lvTimerRef = useRef(null);
+  const liveImgRef = useRef(null);
+  const frameCacheRef = useRef('');
+  const hasFrameRef = useRef(false);
   const restartTimerRef = useRef(null);
   const lvRunningRef = useRef(false);
   const lvStartingRef = useRef(false);
@@ -166,14 +169,24 @@ export default function LiveViewScreen() {
       setLvOn(true);
       lvRunningRef.current = true;
       frameStatsRef.current = { count: 0, startedAt: performance.now() };
+      const targetIntervalMs = 1000 / 30;
 
       const loop = async () => {
         if (!lvRunningRef.current || !mountedRef.current) return;
+        const loopStartedAt = performance.now();
         try {
           const result = await camera.getLiveViewFrame();
           if (!mountedRef.current || !lvRunningRef.current) return;
           if (result?.frame) {
-            setFrame(result.frame);
+            frameCacheRef.current = result.frame;
+            const frameUrl = result.frame.startsWith('data:')
+              ? result.frame
+              : `data:image/jpeg;base64,${result.frame}`;
+            if (liveImgRef.current) liveImgRef.current.src = frameUrl;
+            if (!hasFrameRef.current) {
+              hasFrameRef.current = true;
+              setHasFrame(true);
+            }
             lastFrameAtRef.current = performance.now();
             const stats = frameStatsRef.current;
             stats.count += 1;
@@ -187,7 +200,10 @@ export default function LiveViewScreen() {
         } catch (e) {
           if (mountedRef.current) setLvError(`取景中断：${e.message || e}`);
         }
-        if (lvRunningRef.current && mountedRef.current) lvTimerRef.current = setTimeout(loop, 65);
+        if (lvRunningRef.current && mountedRef.current) {
+          const waitMs = Math.max(0, targetIntervalMs - (performance.now() - loopStartedAt));
+          lvTimerRef.current = setTimeout(loop, waitMs);
+        }
       };
       loop();
     } catch (e) {
@@ -211,9 +227,22 @@ export default function LiveViewScreen() {
     if (mountedRef.current) {
       setLvOn(false);
       setFps(0);
-      if (clearFrame) setFrame(null);
+      if (clearFrame) {
+        frameCacheRef.current = '';
+        hasFrameRef.current = false;
+        if (liveImgRef.current) liveImgRef.current.removeAttribute('src');
+        setHasFrame(false);
+      }
     }
   };
+
+  useEffect(() => {
+    if (!hasFrame || !liveImgRef.current || !frameCacheRef.current) return;
+    const frameUrl = frameCacheRef.current.startsWith('data:')
+      ? frameCacheRef.current
+      : `data:image/jpeg;base64,${frameCacheRef.current}`;
+    liveImgRef.current.src = frameUrl;
+  }, [hasFrame]);
 
   useEffect(() => {
     if (!connected || !monitorMode) return undefined;
@@ -467,7 +496,7 @@ export default function LiveViewScreen() {
     }
   };
   let guideRect = null;
-  if (frame && viewport.width > 0 && viewport.height > 0 && imageSize.width > 0 && imageSize.height > 0) {
+  if (hasFrame && viewport.width > 0 && viewport.height > 0 && imageSize.width > 0 && imageSize.height > 0) {
     const imageAspect = imageSize.width / imageSize.height;
     const viewAspect = viewport.width / viewport.height;
     let width;
@@ -485,9 +514,9 @@ export default function LiveViewScreen() {
   return (
     <div className="h-full w-full relative overflow-hidden bg-black text-white">
       <div ref={lvRef} className="absolute inset-0 cursor-crosshair" onClick={handleTap}>
-        {frame ? (
+        {hasFrame ? (
           <img
-            src={frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}`}
+            ref={liveImgRef}
             className="absolute inset-0 w-full h-full"
             style={{ objectFit: 'contain' }}
             onLoad={handleFrameLoad}

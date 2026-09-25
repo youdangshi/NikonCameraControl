@@ -18,6 +18,8 @@ import {
   detectCameraBrand,
   getBrandCapabilities,
 } from './cameraBrands.js';
+import { detectNikonModel, extractPtpStrings } from './nikonModels.js';
+import { assertAdapterCommand, getCameraAdapter } from './cameraAdapters.js';
 import { parseDevicePropDesc } from './ptpPropertyDesc.js';
 
 const API = ''; // 相对路径，同源
@@ -32,6 +34,7 @@ let mobileSessionMode = null;
 let mobileSessionProfile = null;
 let mobileSessionBrand = null;
 let mobileSessionModel = null;
+let mobileSessionModelProfile = null;
 let demoCam = null;       // 演示相机（无真机也能跑通）
 let lastConnectRequest = null;
 let autoReconnectTimer = null;
@@ -157,6 +160,17 @@ function resolveCameraBrand(requestedBrand, model, vendorExtensionId = null) {
     || detectCameraBrand({ model, vendorExtensionId });
 }
 
+function resolveNikonModelProfile(strings, fallback = '') {
+  const candidates = [...(strings || []), fallback]
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  for (const candidate of candidates) {
+    const profile = detectNikonModel(candidate);
+    if (profile.id !== 'nikon-generic') return profile;
+  }
+  return detectNikonModel(fallback);
+}
+
 function cameraInfo(brand, model) {
   return {
     ...brandSummary(brand),
@@ -165,7 +179,9 @@ function cameraInfo(brand, model) {
 }
 
 function assertCameraCapability(capability, actionLabel) {
-  const { brand, capabilities } = getBrandCapabilities(mobileSessionBrand);
+  const { brand } = getBrandCapabilities(mobileSessionBrand);
+  const adapter = getCameraAdapter(brand);
+  const capabilities = adapter.capabilities;
   if (capabilities[capability]) return brand;
   const error = new Error(`${brand.label} 当前未实现${actionLabel}，已阻止发送不兼容的私有命令。`);
   error.code = 'CAMERA_BRAND_CAPABILITY_UNSUPPORTED';
@@ -573,6 +589,7 @@ export const camera = {
         mobileSessionProfile = null;
         mobileSessionBrand = null;
         mobileSessionModel = null;
+        mobileSessionModelProfile = null;
         emit('status', { state: 'error', mode, profile, host, port, error: message, direct: true });
         emit('error', { error: message, direct: true });
         scheduleAutoReconnect(message || '相机连接已断开');
@@ -583,11 +600,17 @@ export const camera = {
       // 尝试读取设备信息以识别品牌（失败也不阻塞连接）。
       let model = selectedBrand ? `${selectedBrand.label} PTP/IP` : 'Nikon PTP/IP';
       let vendorExtensionId = null;
+      let deviceInfoText = '';
       try {
         const dev = await session.command(OC.GetDeviceInfo, [], 5000);
         vendorExtensionId = readDeviceInfoVendorExtensionId(dev?.payload);
+        deviceInfoText = extractPtpStrings(dev?.payload).find(value => /^z\s?[0-9_]/i.test(value.trim())) || '';
       } catch {}
       const brand = resolveCameraBrand(requestedBrand, model, vendorExtensionId);
+      mobileSessionModelProfile = brand.id === 'nikon'
+        ? resolveNikonModelProfile(deviceInfoText ? [deviceInfoText] : [], model)
+        : null;
+      if (mobileSessionModelProfile) model = mobileSessionModelProfile.label;
       mobileSessionBrand = brand.id;
       mobileSessionModel = model;
       if (brand.id === 'nikon' && typeof session.prepareForControl === 'function') {
@@ -612,6 +635,7 @@ export const camera = {
           ? (profile === 'device' ? 'STA · 智能设备传输' : 'STA · PC 控制')
           : 'WiFi',
         ip: host,
+        modelProfile: mobileSessionModelProfile,
       });
       autoReconnectAttempts = 0;
       recordDiagnostic(`连接成功：${mode}${host ? ` · ${host}:${port}` : ''}`, 'success');
@@ -636,23 +660,30 @@ export const camera = {
     try {
       const session = await openUsbSession(diag);
       const brand = explicitBrand(requestedBrand) || CAMERA_BRANDS.nikon;
+      let controlInfo = null;
       if (brand.id === 'nikon' && typeof session.prepareForControl === 'function') {
         // Nikon Z30 answers ChangeApplicationMode in PTP/IP mode, but the
         // same vendor request times out on its USB PTP interface. Sending it
         // there leaves an unfinished OUT transfer and corrupts later reads.
-        await session.prepareForControl({ applicationMode: false }).catch(() => {});
+        controlInfo = await session.prepareForControl({ applicationMode: false }).catch(() => null);
       }
+      const deviceStrings = extractPtpStrings(controlInfo?.info?.payload);
+      const deviceModel = deviceStrings.find(value => /^z\s?[0-9_]/i.test(value.trim())) || '';
+      mobileSessionModelProfile = brand.id === 'nikon'
+        ? resolveNikonModelProfile(deviceStrings, deviceModel)
+        : null;
       mobileSession = session;
       mobileSessionMode = 'usb';
       mobileSessionProfile = null;
       mobileSessionBrand = brand.id;
-      mobileSessionModel = `${brand.label} (USB)`;
+      mobileSessionModel = mobileSessionModelProfile?.label || `${brand.label} (USB)`;
       emit('status', { state: 'session_open', mode: 'usb', brand: brand.id, brandLabel: brand.label, direct: true });
       emit('camera_info', {
         ...cameraInfo(brand, mobileSessionModel),
         model: mobileSessionModel,
         connection: 'USB',
         ip: 'USB',
+        modelProfile: mobileSessionModelProfile,
       });
       autoReconnectAttempts = 0;
       recordDiagnostic('USB 相机连接成功。', 'success');
@@ -678,6 +709,7 @@ export const camera = {
       mobileSessionProfile = null;
       mobileSessionBrand = null;
       mobileSessionModel = null;
+      mobileSessionModelProfile = null;
     }
     emit('status', { state: 'disconnected' });
     if (isNativeMobile()) return { success: true, direct: true };
@@ -713,6 +745,8 @@ export const camera = {
         error.code = 'STA_CAPTURE_UNSUPPORTED';
         throw error;
       }
+      const adapter = getCameraAdapter(mobileSessionBrand);
+      const captureOp = assertAdapterCommand(adapter, 'capture');
       const attempts = [
         [0xFFFFFFFF, 0],
         [0xFFFFFFFF, 0xFFFFFFFF],
@@ -720,7 +754,7 @@ export const camera = {
       ];
       let lastCode = 0;
       for (const params of attempts) {
-        const resp = await mobileSession.command(OC.NikonInitiateCaptureRecInMedia, params, 12000);
+        const resp = await mobileSession.command(captureOp, params, 12000);
         lastCode = resp.responseCode;
         if (resp.responseCode === 0x2001) {
           emit('captured', { success: true, time: Date.now() });
@@ -888,9 +922,11 @@ export const camera = {
         error.code = 'STA_LIVEVIEW_UNSUPPORTED';
         throw error;
       }
+      const adapter = getCameraAdapter(mobileSessionBrand);
+      const startLiveViewOp = assertAdapterCommand(adapter, 'startLiveView');
       let resp = null;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        resp = await mobileSession.command(OC.NikonStartLiveView, [], 10000);
+        resp = await mobileSession.command(startLiveViewOp, [], 10000);
         if (resp.responseCode === 0x2001 || resp.responseCode === 0x201E) break;
         if (resp.responseCode !== 0x2019) break;
         await new Promise(resolve => setTimeout(resolve, 220));
@@ -898,7 +934,7 @@ export const camera = {
       const success = resp.responseCode === 0x2001 || resp.responseCode === 0x201E;
       emit('liveview', { running: success });
       if (!success) throw new Error(`启动实时取景失败：PTP 0x${Number(resp.responseCode).toString(16)}`);
-      if (typeof mobileSession.waitForDeviceReady === 'function') {
+      if (adapter.commands.deviceReady != null && typeof mobileSession.waitForDeviceReady === 'function') {
         const readiness = await mobileSession.waitForDeviceReady(4500);
         if (!readiness?.ready) {
           recordDiagnostic(`Nikon DeviceReady 未确认${readiness?.code ? `（PTP 0x${Number(readiness.code).toString(16)}）` : ''}，继续尝试读取取景帧`, 'warn');
@@ -913,8 +949,9 @@ export const camera = {
   async stopLiveView() {
     if (demoCam) return demoCam.stopLiveView();
     if (mobileSession) {
-      if (getBrandCapabilities(mobileSessionBrand).capabilities.liveView) {
-        try { await mobileSession.command(OC.NikonEndLiveView, [], 3000); } catch {}
+      const adapter = getCameraAdapter(mobileSessionBrand);
+      if (adapter.capabilities.liveView && adapter.commands.endLiveView != null) {
+        try { await mobileSession.command(adapter.commands.endLiveView, [], 3000); } catch {}
       }
       emit('liveview', { running: false });
       return { success: true };
@@ -927,9 +964,11 @@ export const camera = {
     if (demoCam) return demoCam.getLiveViewFrame();
     if (mobileSession) {
       assertCameraCapability('liveView', '实时取景');
+      const adapter = getCameraAdapter(mobileSessionBrand);
+      const frameOp = assertAdapterCommand(adapter, 'getLiveViewImage');
       let resp = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        resp = await mobileSession.command(OC.NikonGetLiveViewImg, [], 12000);
+        resp = await mobileSession.command(frameOp, [], 12000);
         if (resp.responseCode === 0x2001 || resp.responseCode !== 0x2019) break;
         await new Promise(resolve => setTimeout(resolve, 80));
       }
@@ -951,7 +990,9 @@ export const camera = {
         error.code = 'STA_AF_UNSUPPORTED';
         throw error;
       }
-      const resp = await mobileSession.command(OC.NikonAfDrive, []);
+      const adapter = getCameraAdapter(mobileSessionBrand);
+      const afOp = assertAdapterCommand(adapter, 'afDrive');
+      const resp = await mobileSession.command(afOp, []);
       const ok = resp.responseCode === 0x2001;
       if (!ok) throw new Error(`自动对焦失败：PTP 0x${resp.responseCode.toString(16)}`);
       return { success: true };
@@ -1106,6 +1147,7 @@ export const camera = {
         profile: mobileSessionProfile,
         brand: mobileSessionBrand,
         model: mobileSessionModel,
+        modelProfile: mobileSessionModelProfile,
         connected: Boolean(mobileSession),
       },
       lastConnectRequest,

@@ -71,6 +71,7 @@ function ipResponse(code, tx, params = []) {
 }
 
 class FakeIpTransport {
+  constructor() { this.ops = []; }
   onData(cb) { this.onCommand = cb; }
   onEventData(cb) { this.onEvent = cb; }
   async connect() {}
@@ -89,6 +90,7 @@ class FakeIpTransport {
     }
     if (type === 6) {
       const opCode = u16(bytes, 12);
+      this.ops.push(opCode);
       const tx = u32(bytes, 14);
       if (opCode === 0x1001) {
         const start = new Uint8Array(12);
@@ -112,6 +114,7 @@ class FakeIpTransport {
 }
 
 class FakeUsbTransport {
+  constructor() { this.ops = []; }
   onData(cb) { this.onDataCallback = cb; }
   onState() { return () => {}; }
   async connect() {}
@@ -121,6 +124,7 @@ class FakeUsbTransport {
     const type = u16(bytes, 4);
     if (type === 1) {
       const opCode = u16(bytes, 6);
+      this.ops.push(opCode);
       const tx = u32(bytes, 8);
       if (opCode === 0x1001) {
         this.onDataCallback(usbContainer(2, opCode, tx, new Uint8Array([1, 2, 3])));
@@ -136,19 +140,33 @@ class FakeUsbTransport {
   }
 }
 
-const ip = new PtpIpSession(new FakeIpTransport(), { onDiagnose: () => {} });
+const ipTransport = new FakeIpTransport();
+const ip = new PtpIpSession(ipTransport, { onDiagnose: () => {} });
 await ip.open('127.0.0.1', 15740);
 if (ip.sessionId !== 7) throw new Error('PTP/IP session id mismatch');
 const ipInfo = await ip.command(0x1001, []);
 if (ipInfo.payload.length !== 3 || ipInfo.payload[2] !== 3) throw new Error('PTP/IP data phase mismatch');
+await ip.prepareForControl();
+const ipReady = await ip.waitForDeviceReady(1200);
+if (!ipReady.ready) throw new Error('PTP/IP Nikon DeviceReady was not confirmed');
+if (!ipTransport.ops.includes(0x9435) || !ipTransport.ops.includes(0x90c8)) {
+  throw new Error(`PTP/IP Nikon control sequence missing: ${ipTransport.ops.map(v => v.toString(16)).join(',')}`);
+}
 await ip.close();
 
-const usb = new PtpUsbSession(new FakeUsbTransport(), { onDiagnose: () => {} });
+const usbTransport = new FakeUsbTransport();
+const usb = new PtpUsbSession(usbTransport, { onDiagnose: () => {} });
 await usb.open();
 const usbInfo = await usb.command(0x1001, []);
 if (usbInfo.payload.length !== 3 || usbInfo.payload[2] !== 3) throw new Error('USB data phase mismatch');
 const prop = await usb.command(0x1016, [0x5005], 8000, new Uint8Array([2, 0]));
 if (prop.responseCode !== 0x2001) throw new Error('USB data-out phase failed');
+await usb.prepareForControl();
+const usbReady = await usb.waitForDeviceReady(1200);
+if (!usbReady.ready) throw new Error('USB Nikon DeviceReady was not confirmed');
+if (!usbTransport.ops.includes(0x9435) || !usbTransport.ops.includes(0x90c8)) {
+  throw new Error(`USB Nikon control sequence missing: ${usbTransport.ops.map(v => v.toString(16)).join(',')}`);
+}
 await usb.close();
 
 // Nikon Z30 property conversions: labels must never be passed to SetDevicePropValue.

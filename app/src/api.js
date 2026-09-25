@@ -51,6 +51,7 @@ const OC = {
   NikonStartLiveView: 0x9201,
   NikonEndLiveView: 0x9202,
   NikonGetLiveViewImg: 0x9203,
+  NikonDeviceReady: 0x90C8,
   NikonChangeApplicationMode: 0x9435,
   NikonAfDrive: 0x90C1,
   NikonInitiateCaptureRecInMedia: 0x9207,
@@ -517,6 +518,11 @@ export const camera = {
       const brand = resolveCameraBrand(requestedBrand, model, vendorExtensionId);
       mobileSessionBrand = brand.id;
       mobileSessionModel = model;
+      if (brand.id === 'nikon' && typeof session.prepareForControl === 'function') {
+        await session.prepareForControl({
+          applicationMode: !(mode === 'sta' && profile === 'device'),
+        }).catch(() => {});
+      }
       emit('status', {
         state: 'session_open',
         mode,
@@ -556,6 +562,9 @@ export const camera = {
     try {
       const session = await openUsbSession(diag);
       const brand = explicitBrand(requestedBrand) || CAMERA_BRANDS.nikon;
+      if (brand.id === 'nikon' && typeof session.prepareForControl === 'function') {
+        await session.prepareForControl({ applicationMode: true }).catch(() => {});
+      }
       mobileSession = session;
       mobileSessionMode = 'usb';
       mobileSessionProfile = null;
@@ -796,10 +805,22 @@ export const camera = {
         error.code = 'STA_LIVEVIEW_UNSUPPORTED';
         throw error;
       }
-      const resp = await mobileSession.command(OC.NikonStartLiveView, [], 10000);
+      let resp = null;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        resp = await mobileSession.command(OC.NikonStartLiveView, [], 10000);
+        if (resp.responseCode === 0x2001 || resp.responseCode === 0x201E) break;
+        if (resp.responseCode !== 0x2019) break;
+        await new Promise(resolve => setTimeout(resolve, 220));
+      }
       const success = resp.responseCode === 0x2001 || resp.responseCode === 0x201E;
       emit('liveview', { running: success });
       if (!success) throw new Error(`启动实时取景失败：PTP 0x${Number(resp.responseCode).toString(16)}`);
+      if (typeof mobileSession.waitForDeviceReady === 'function') {
+        const readiness = await mobileSession.waitForDeviceReady(4500);
+        if (!readiness?.ready) {
+          emit('diagnostic', `Nikon DeviceReady 未确认${readiness?.code ? `（PTP 0x${Number(readiness.code).toString(16)}）` : ''}，继续尝试读取取景帧`);
+        }
+      }
       return { success: true };
     }
     return fetchJSON('POST', '/api/liveview/start');
@@ -810,7 +831,7 @@ export const camera = {
     if (demoCam) return demoCam.stopLiveView();
     if (mobileSession) {
       if (getBrandCapabilities(mobileSessionBrand).capabilities.liveView) {
-        try { await mobileSession.command(OC.NikonEndLiveView, []); } catch {}
+        try { await mobileSession.command(OC.NikonEndLiveView, [], 3000); } catch {}
       }
       emit('liveview', { running: false });
       return { success: true };
@@ -823,7 +844,12 @@ export const camera = {
     if (demoCam) return demoCam.getLiveViewFrame();
     if (mobileSession) {
       assertCameraCapability('liveView', '实时取景');
-      const resp = await mobileSession.command(OC.NikonGetLiveViewImg, [], 12000);
+      let resp = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        resp = await mobileSession.command(OC.NikonGetLiveViewImg, [], 12000);
+        if (resp.responseCode === 0x2001 || resp.responseCode !== 0x2019) break;
+        await new Promise(resolve => setTimeout(resolve, 80));
+      }
       if (resp.responseCode !== 0x2001) return { frame: null, code: resp.responseCode, direct: true };
       const jpeg = extractJpeg(resp.payload);
       if (!jpeg) return { frame: null, direct: true };

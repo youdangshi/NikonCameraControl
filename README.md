@@ -99,6 +99,8 @@ https://github.com/youdangshi/NikonCameraControl/releases/latest
 
 PC 控制连接使用 `Nikon PC` 作为 PTP/IP 客户端名称，并在进入取景前请求相机切换 `ChangeApplicationMode(1)`，退出取景后恢复文件传输模式。
 
+Nikon 实时取景会继续轮询 `DeviceReady (0x90C8)`，确认取景传感器就绪后再读取画面；遇到相机忙状态会自动重试，减少进入取景页后的偶发空帧。
+
 ### USB Type-C
 
 1. 使用支持数据传输的 Type-C 线。

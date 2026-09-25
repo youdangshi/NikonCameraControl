@@ -54,6 +54,27 @@ function readU16LE(buf, off) {
   return (buf[off] & 0xff) | ((buf[off + 1] & 0xff) << 8);
 }
 
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Nikon StartLiveView is asynchronous. DeviceReady (0x90C8) is the official
+ * handshake used to confirm that the live-view sensor has finished activating.
+ */
+async function waitNikonDeviceReady(session, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastCode = null;
+  while (Date.now() < deadline) {
+    try {
+      const ready = await session.command(0x90C8, [], 1500);
+      lastCode = ready.responseCode;
+      if (ready.responseCode === 0x2001) return { ready: true, code: lastCode };
+      if (ready.responseCode !== 0x2019) break;
+    } catch {}
+    await delay(180);
+  }
+  return { ready: false, code: lastCode };
+}
+
 // ─── 字节队列（读取定长数据） ──────────────────────────
 class ByteBuffer {
   constructor() { this.chunks = []; this.available = 0; this.waiters = []; }
@@ -479,6 +500,34 @@ export class PtpIpSession {
     return resp;
   }
 
+  /**
+   * Unlock Nikon vendor extensions and activate application-control mode.
+   * This is non-fatal because some bodies and transfer-only workflows reject it.
+   */
+  async prepareForControl({ applicationMode = true } = {}) {
+    let info = null;
+    let appMode = null;
+    try {
+      info = await this.command(0x1001, [], 5000);
+      this._diag(`Nikon GetDeviceInfo：0x${info.responseCode.toString(16)}，${info.payload.length} 字节`);
+    } catch (e) {
+      this._diag(`Nikon GetDeviceInfo 非致命失败：${e.message || e}`);
+    }
+    if (applicationMode) {
+      try {
+        appMode = await this.command(0x9435, [1], 3000);
+        this._diag(`Nikon ChangeApplicationMode：0x${appMode.responseCode.toString(16)}`);
+      } catch (e) {
+        this._diag(`Nikon ChangeApplicationMode 非致命失败：${e.message || e}`);
+      }
+    }
+    return { info, appMode };
+  }
+
+  async waitForDeviceReady(timeoutMs = 5000) {
+    return waitNikonDeviceReady(this, timeoutMs);
+  }
+
   async close() {
     if (this.closed) return;
     this.intentionalClose = true;
@@ -748,6 +797,30 @@ export class PtpUsbSession {
     this.opened = true;
     this._diag('USB 会话已打开');
     return resp;
+  }
+
+  async prepareForControl({ applicationMode = true } = {}) {
+    let info = null;
+    let appMode = null;
+    try {
+      info = await this.command(0x1001, [], 5000);
+      this._diag(`Nikon USB GetDeviceInfo：0x${info.responseCode.toString(16)}，${info.payload.length} 字节`);
+    } catch (e) {
+      this._diag(`Nikon USB GetDeviceInfo 非致命失败：${e.message || e}`);
+    }
+    if (applicationMode) {
+      try {
+        appMode = await this.command(0x9435, [1], 3000);
+        this._diag(`Nikon USB ChangeApplicationMode：0x${appMode.responseCode.toString(16)}`);
+      } catch (e) {
+        this._diag(`Nikon USB ChangeApplicationMode 非致命失败：${e.message || e}`);
+      }
+    }
+    return { info, appMode };
+  }
+
+  async waitForDeviceReady(timeoutMs = 5000) {
+    return waitNikonDeviceReady(this, timeoutMs);
   }
 
   async close() {

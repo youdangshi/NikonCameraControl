@@ -1,9 +1,13 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../App.jsx';
-import { AI_PROVIDERS } from '../ai.js';
+import {
+  AI_PROVIDERS,
+  AI_PROVIDER_PRESETS,
+  fetchProviderModels,
+} from '../ai.js';
 import { POSE_ITEMS } from '../components/PoseLibrary.jsx';
 import {
-  Bot, Cable, Camera, Check, Info, KeyRound, Palette, Save, SlidersHorizontal, UserRound,
+  Bot, Cable, Camera, Check, Info, KeyRound, Palette, RefreshCw, Save, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 import { getNikonModelCatalog } from '../nikonModels.js';
 import { getAdapterCatalog } from '../cameraAdapters.js';
@@ -27,13 +31,59 @@ export default function SettingsScreen() {
   const { state, updateState, updatePoseGuides, updateAiSettings } = useContext(AppContext);
   const [apiKey, setApiKey] = useState(state.aiApiKey);
   const [saved, setSaved] = useState(false);
+  const [models, setModels] = useState([]);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelError, setModelError] = useState('');
   const pose = state.poseGuides;
+  const providerId = state.aiSettings.provider || 'deepseek';
+  const providerPreset = AI_PROVIDER_PRESETS[providerId] || AI_PROVIDER_PRESETS.deepseek;
 
   const saveKey = () => {
     updateState({ aiApiKey: apiKey });
     localStorage.setItem('nikon_ai_key', apiKey);
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
+  };
+
+  const chooseProvider = (nextProvider) => {
+    const preset = AI_PROVIDER_PRESETS[nextProvider] || AI_PROVIDER_PRESETS.deepseek;
+    setModels([]);
+    setModelError('');
+    updateAiSettings({
+      provider: nextProvider,
+      baseUrl: preset.baseUrl,
+      endpoint: preset.chatEndpoint,
+      modelsEndpoint: preset.modelsEndpoint,
+      model: preset.defaultModel,
+    });
+  };
+
+  const loadModels = async () => {
+    setModelLoading(true);
+    setModelError('');
+    try {
+      const result = await fetchProviderModels({
+        provider: providerId,
+        apiKey,
+        settings: state.aiSettings,
+      });
+      setModels(result.models);
+      const current = result.models.find(model => model.id === state.aiSettings.model);
+      const preferred = current || result.models.find(model => model.vision) || result.models[0];
+      updateAiSettings({
+        provider: providerId,
+        endpoint: result.endpoint,
+        model: preferred?.id || state.aiSettings.model,
+      });
+      updateState({ aiApiKey: apiKey });
+      localStorage.setItem('nikon_ai_key', apiKey);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch (error) {
+      setModelError(error?.message || String(error));
+    } finally {
+      setModelLoading(false);
+    }
   };
 
   return (
@@ -54,15 +104,58 @@ export default function SettingsScreen() {
           <p className="text-[10px] text-[var(--text-muted)] mt-2">密钥只保存在当前设备，不会上传到相机或妮妮服务器。</p>
         </Section>
 
-        <Section icon={Bot} title="AI 模型" description="支持 DeepSeek 或其他 OpenAI 兼容接口">
+        <Section icon={Bot} title="AI 模型" description="选择供应商并输入 API Key，自动获取账号可用模型">
           <label className="block text-[10px] text-[var(--text-muted)] mb-1.5">服务提供商</label>
-          <select className="select mb-3" value={state.aiSettings.provider} onChange={event => updateAiSettings({ provider: event.target.value })}>
+          <select className="select mb-3" value={providerId} onChange={event => chooseProvider(event.target.value)}>
             {AI_PROVIDERS.map(provider => <option key={provider.value} value={provider.value}>{provider.label}</option>)}
           </select>
-          <label className="block text-[10px] text-[var(--text-muted)] mb-1.5">接口地址</label>
-          <input className="input mono mb-3" placeholder="https://api.deepseek.com/v1/chat/completions" value={state.aiSettings.endpoint} onChange={event => updateAiSettings({ endpoint: event.target.value })} />
-          <label className="block text-[10px] text-[var(--text-muted)] mb-1.5">模型名称</label>
-          <input className="input mono" placeholder="deepseek-chat" value={state.aiSettings.model} onChange={event => updateAiSettings({ model: event.target.value })} />
+          <div className="rounded-md border border-[var(--line)] bg-black/20 px-3 py-2.5 mb-3">
+            <div className="flex justify-between gap-3 text-[10px]">
+              <span className="text-[var(--text-muted)]">接口地址</span>
+              <span className="mono text-[var(--text-soft)] text-right break-all">{state.aiSettings.endpoint || providerPreset.chatEndpoint || '未配置'}</span>
+            </div>
+            <div className="flex justify-between gap-3 text-[10px] mt-2">
+              <span className="text-[var(--text-muted)]">模型列表</span>
+              <span className="text-[var(--text-soft)]">{models.length ? `${models.length} 个可用` : '尚未获取'}</span>
+            </div>
+          </div>
+          <button className="btn btn-secondary w-full mb-3" onClick={loadModels} disabled={modelLoading || (providerPreset.auth !== 'none' && !apiKey)}>
+            <RefreshCw size={14} className={modelLoading ? 'animate-spin' : ''} /> {modelLoading ? '正在获取模型' : '获取账号可用模型'}
+          </button>
+          <label className="block text-[10px] text-[var(--text-muted)] mb-1.5">模型</label>
+          {models.length > 0 ? (
+            <select className="select mono" value={state.aiSettings.model || ''} onChange={event => updateAiSettings({ model: event.target.value })}>
+              {state.aiSettings.model && !models.some(model => model.id === state.aiSettings.model) && <option value={state.aiSettings.model}>{state.aiSettings.model}（当前）</option>}
+              {models.map(model => (
+                <option key={model.id} value={model.id}>
+                  {model.id}{model.vision ? ' · 视觉' : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="input mono"
+              placeholder={providerPreset.defaultModel || '模型名称'}
+              value={state.aiSettings.model || ''}
+              onChange={event => updateAiSettings({ model: event.target.value })}
+            />
+          )}
+          {providerId === 'custom' && (
+            <div className="space-y-3 mt-3">
+              <div>
+                <label className="block text-[10px] text-[var(--text-muted)] mb-1.5">Chat Completions 地址</label>
+                <input className="input mono" placeholder="https://example.com/v1/chat/completions" value={state.aiSettings.endpoint || ''} onChange={event => updateAiSettings({ endpoint: event.target.value })} />
+              </div>
+              <div>
+                <label className="block text-[10px] text-[var(--text-muted)] mb-1.5">模型列表地址（可选）</label>
+                <input className="input mono" placeholder="https://example.com/v1/models" value={state.aiSettings.modelsEndpoint || ''} onChange={event => updateAiSettings({ modelsEndpoint: event.target.value })} />
+              </div>
+            </div>
+          )}
+          {modelError && <p className="text-[9px] leading-4 text-[var(--red)] mt-3">{modelError}</p>}
+          <p className="text-[9px] leading-4 text-[var(--text-muted)] mt-3">
+            选择供应商后会自动填入接口地址。输入 API Key 后可读取该账号当前可用模型，并优先选择支持视觉的模型。
+          </p>
         </Section>
 
         <Section icon={Cable} title="相机连接" description="默认网络地址和 PTP/IP 端口">
@@ -130,7 +223,7 @@ export default function SettingsScreen() {
 
         <Section icon={Info} title="关于妮妮" description="Android 相机控制与修图应用">
           <div className="space-y-2 text-[10px] text-[var(--text-soft)]">
-            <div className="flex justify-between"><span>版本</span><span className="mono">1.9.0</span></div>
+            <div className="flex justify-between"><span>版本</span><span className="mono">1.10.0</span></div>
             <div className="flex justify-between"><span>相机协议</span><span className="mono">PTP / PTP-IP</span></div>
             <div className="flex justify-between"><span>图像处理</span><span>本地画布引擎</span></div>
           </div>

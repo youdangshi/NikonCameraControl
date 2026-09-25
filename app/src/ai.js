@@ -6,17 +6,144 @@
  *   structured recipe -> user-applied, undoable adjustments.
  */
 
-const PROVIDER_PRESETS = {
-  deepseek: { endpoint: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat', vision: false },
-  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini', vision: true },
-  custom: { endpoint: '', model: '', vision: true },
-};
+export const AI_PROVIDER_PRESETS = Object.freeze({
+  openai: Object.freeze({
+    id: 'openai',
+    label: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    chatEndpoint: 'https://api.openai.com/v1/chat/completions',
+    modelsEndpoint: 'https://api.openai.com/v1/models',
+    auth: 'bearer',
+    defaultModel: 'gpt-4o-mini',
+    recommendedModels: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
+  }),
+  deepseek: Object.freeze({
+    id: 'deepseek',
+    label: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    chatEndpoint: 'https://api.deepseek.com/v1/chat/completions',
+    modelsEndpoint: 'https://api.deepseek.com/v1/models',
+    auth: 'bearer',
+    defaultModel: 'deepseek-chat',
+    recommendedModels: ['deepseek-chat', 'deepseek-reasoner'],
+  }),
+  siliconflow: Object.freeze({
+    id: 'siliconflow',
+    label: '硅基流动 SiliconFlow',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    chatEndpoint: 'https://api.siliconflow.cn/v1/chat/completions',
+    modelsEndpoint: 'https://api.siliconflow.cn/v1/models',
+    auth: 'bearer',
+    defaultModel: 'Qwen/Qwen2.5-VL-72B-Instruct',
+    recommendedModels: ['Qwen/Qwen2.5-VL-72B-Instruct', 'Qwen/Qwen2.5-VL-32B-Instruct', 'deepseek-ai/DeepSeek-V3'],
+  }),
+  dashscope: Object.freeze({
+    id: 'dashscope',
+    label: '阿里云百炼 DashScope',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    chatEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    modelsEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/models',
+    auth: 'bearer',
+    defaultModel: 'qwen-vl-max-latest',
+    recommendedModels: ['qwen-vl-max-latest', 'qwen-vl-plus-latest', 'qwen-plus', 'qwen-max'],
+  }),
+  ark: Object.freeze({
+    id: 'ark',
+    label: '火山方舟 Ark',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    chatEndpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+    modelsEndpoint: 'https://ark.cn-beijing.volces.com/api/v3/models',
+    auth: 'bearer',
+    defaultModel: '',
+    recommendedModels: [],
+  }),
+  moonshot: Object.freeze({
+    id: 'moonshot',
+    label: '月之暗面 Moonshot',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    chatEndpoint: 'https://api.moonshot.cn/v1/chat/completions',
+    modelsEndpoint: 'https://api.moonshot.cn/v1/models',
+    auth: 'bearer',
+    defaultModel: 'moonshot-v1-8k-vision-preview',
+    recommendedModels: ['moonshot-v1-8k-vision-preview', 'moonshot-v1-32k-vision-preview', 'kimi-latest'],
+  }),
+  zhipu: Object.freeze({
+    id: 'zhipu',
+    label: '智谱 BigModel',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    chatEndpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    modelsEndpoint: 'https://open.bigmodel.cn/api/paas/v4/models',
+    auth: 'bearer',
+    defaultModel: 'glm-4v-flash',
+    recommendedModels: ['glm-4v-flash', 'glm-4v-plus', 'glm-4-plus'],
+  }),
+  openrouter: Object.freeze({
+    id: 'openrouter',
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    chatEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    modelsEndpoint: 'https://openrouter.ai/api/v1/models',
+    auth: 'bearer',
+    defaultModel: 'openai/gpt-4o-mini',
+    recommendedModels: ['openai/gpt-4o-mini', 'google/gemini-2.0-flash-001', 'qwen/qwen-2.5-vl-72b-instruct'],
+    extraHeaders: { 'HTTP-Referer': 'https://github.com/youdangshi/NikonCameraControl', 'X-Title': 'Nini Camera Control' },
+  }),
+  groq: Object.freeze({
+    id: 'groq',
+    label: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    chatEndpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    modelsEndpoint: 'https://api.groq.com/openai/v1/models',
+    auth: 'bearer',
+    defaultModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    recommendedModels: ['meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'],
+  }),
+  xai: Object.freeze({
+    id: 'xai',
+    label: 'xAI',
+    baseUrl: 'https://api.x.ai/v1',
+    chatEndpoint: 'https://api.x.ai/v1/chat/completions',
+    modelsEndpoint: 'https://api.x.ai/v1/models',
+    auth: 'bearer',
+    defaultModel: 'grok-2-vision-latest',
+    recommendedModels: ['grok-2-vision-latest', 'grok-2-latest'],
+  }),
+  mistral: Object.freeze({
+    id: 'mistral',
+    label: 'Mistral AI',
+    baseUrl: 'https://api.mistral.ai/v1',
+    chatEndpoint: 'https://api.mistral.ai/v1/chat/completions',
+    modelsEndpoint: 'https://api.mistral.ai/v1/models',
+    auth: 'bearer',
+    defaultModel: 'pixtral-large-latest',
+    recommendedModels: ['pixtral-large-latest', 'pixtral-12b-2409', 'mistral-large-latest'],
+  }),
+  ollama: Object.freeze({
+    id: 'ollama',
+    label: 'Ollama 本地',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    chatEndpoint: 'http://127.0.0.1:11434/v1/chat/completions',
+    modelsEndpoint: 'http://127.0.0.1:11434/v1/models',
+    auth: 'none',
+    defaultModel: 'qwen2.5vl:7b',
+    recommendedModels: ['qwen2.5vl:7b', 'llama3.2-vision:11b', 'minicpm-v4.6:1b'],
+  }),
+  custom: Object.freeze({
+    id: 'custom',
+    label: '自定义 OpenAI 兼容接口',
+    baseUrl: '',
+    chatEndpoint: '',
+    modelsEndpoint: '',
+    auth: 'bearer',
+    defaultModel: '',
+    recommendedModels: [],
+  }),
+});
 
-export const AI_PROVIDERS = [
-  { value: 'deepseek', label: 'DeepSeek（文本分析）' },
-  { value: 'openai', label: 'OpenAI / 视觉兼容' },
-  { value: 'custom', label: '自定义模型' },
-];
+export const AI_PROVIDERS = Object.values(AI_PROVIDER_PRESETS).map(provider => ({
+  value: provider.id,
+  label: provider.label,
+}));
 
 export const AI_MODES = Object.freeze([
   { id: 'auto', label: '自动判断' },
@@ -47,17 +174,79 @@ function round(value) {
 }
 
 export function resolveAiSettings(settings = {}) {
-  const preset = PROVIDER_PRESETS[settings.provider] || PROVIDER_PRESETS.deepseek;
-  const model = settings.model || preset.model;
-  const vision = /(vision|vl|gpt-4o|gpt-4\.1|gpt-5|gemini|claude|qwen.*vl|minicpm-v|llava|moondream)/i.test(model)
-    || (settings.provider === 'openai' && !settings.model)
-    || (settings.provider === 'custom' && Boolean(settings.model));
+  const preset = AI_PROVIDER_PRESETS[settings.provider] || AI_PROVIDER_PRESETS.deepseek;
+  const model = settings.model || preset.defaultModel;
+  const capabilities = inferModelCapabilities(model);
   return {
-    provider: settings.provider || 'deepseek',
-    endpoint: settings.endpoint || preset.endpoint,
+    provider: settings.provider || preset.id,
+    baseUrl: settings.baseUrl || preset.baseUrl,
+    endpoint: settings.endpoint || preset.chatEndpoint,
+    modelsEndpoint: settings.modelsEndpoint || preset.modelsEndpoint,
+    auth: preset.auth,
+    extraHeaders: preset.extraHeaders || {},
     model,
-    vision,
+    vision: capabilities.vision,
   };
+}
+
+export function inferModelCapabilities(modelId) {
+  const id = String(modelId || '');
+  const lower = id.toLowerCase();
+  const vision = /(vision|vl|gpt-4o|gpt-4\.1|gpt-5|gemini|claude|pixtral|grok-2-vision|llama-4|llava|minicpm-v|moondream)/i.test(id);
+  const imageOutput = /(dall-e|gpt-image|flux|stable-diffusion|midjourney|image-generation)/i.test(lower);
+  const embedding = /(embedding|embed|rerank|moderation|whisper|tts|audio|realtime)/i.test(lower);
+  return {
+    id,
+    vision,
+    imageOutput,
+    embedding,
+    selectable: !imageOutput && !embedding,
+  };
+}
+
+export function parseProviderModelList(payload, providerId = 'custom') {
+  const raw = Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload?.models)
+      ? payload.models
+      : Array.isArray(payload)
+        ? payload
+        : [];
+  const models = raw
+    .map(item => typeof item === 'string' ? item : (item?.id || item?.name || item?.model))
+    .filter(Boolean)
+    .map(id => ({ id: String(id), ...inferModelCapabilities(id) }))
+    .filter(model => model.selectable);
+  const unique = Array.from(new Map(models.map(model => [model.id, model])).values());
+  unique.sort((a, b) => {
+    if (a.vision !== b.vision) return a.vision ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  });
+  return unique;
+}
+
+export async function fetchProviderModels({ provider = 'deepseek', apiKey = '', settings = {} } = {}) {
+  const preset = AI_PROVIDER_PRESETS[provider] || AI_PROVIDER_PRESETS.custom;
+  const resolved = resolveAiSettings({ ...settings, provider, apiKey });
+  const endpoint = resolved.modelsEndpoint || preset.modelsEndpoint;
+  if (!endpoint) throw new Error('该供应商未配置模型列表地址，请手动填写模型名称。');
+  if (preset.auth !== 'none' && !apiKey) throw new Error('请先输入 API Key，再获取可用模型。');
+
+  const headers = { Accept: 'application/json', ...(preset.extraHeaders || {}) };
+  if (preset.auth !== 'none' && apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const res = await fetch(endpoint, { headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`获取模型列表失败 (${res.status}) ${text.slice(0, 160)}`);
+  }
+  const payload = await res.json();
+  const models = parseProviderModelList(payload, provider);
+  if (!models.length) {
+    const fallback = (preset.recommendedModels || []).map(id => ({ id, ...inferModelCapabilities(id) })).filter(item => item.selectable);
+    if (fallback.length) return { models: fallback, endpoint, fallback: true };
+    throw new Error('API 返回了成功状态，但没有找到可用的对话模型。');
+  }
+  return { models, endpoint, fallback: false };
 }
 
 function loadImage(dataUrl) {
@@ -315,7 +504,7 @@ export async function analyzePhoto(cfg, prompt = '', imageBase64 = '', options =
   const resolved = resolveAiSettings(settings);
   const mode = options.mode || 'auto';
   const local = imageBase64 ? await analyzeImageLocally(imageBase64) : null;
-  if (!apiKey || !resolved.endpoint) {
+  if ((!apiKey && resolved.auth !== 'none') || !resolved.endpoint) {
     return {
       raw: '',
       analysis: local,
@@ -324,7 +513,7 @@ export async function analyzePhoto(cfg, prompt = '', imageBase64 = '', options =
       usedVision: false,
       provider: resolved.provider,
       model: resolved.model,
-      warning: apiKey ? '模型未配置接口地址，已使用本地诊断。' : '未配置 API Key，已使用本地诊断。',
+      warning: !resolved.endpoint ? '模型未配置接口地址，已使用本地诊断。' : '未配置 API Key，已使用本地诊断。',
     };
   }
 
@@ -345,9 +534,14 @@ export async function analyzePhoto(cfg, prompt = '', imageBase64 = '', options =
     response_format: { type: 'json_object' },
   };
 
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(resolved.extraHeaders || {}),
+  };
+  if (resolved.auth !== 'none' && apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const res = await fetch(resolved.endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {

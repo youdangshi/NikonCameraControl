@@ -11,9 +11,10 @@ const path = require('path');
 const net = require('net');
 
 // 打包版启动本地 API / WebSocket / 静态文件服务。
+let localServer = null;
 if (!process.argv.includes('--dev')) {
   try {
-    require(path.join(__dirname, '..', 'server.cjs'));
+    localServer = require(path.join(__dirname, '..', 'server.cjs'));
   } catch (error) {
     console.error('[妮妮] 本地服务启动失败:', error);
   }
@@ -572,6 +573,10 @@ function sendToRenderer(channel, data) {
 app.whenReady().then(() => {
   setupIPC();
   createWindow();
+});
+
+app.on('will-quit', () => {
+  try { localServer?.shutdownServer?.(); } catch {}
 });
 
 app.on('window-all-closed', () => {

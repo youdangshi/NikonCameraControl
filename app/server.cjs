@@ -782,6 +782,33 @@ wsServer.on('connection', (ws) => {
   ws.on('error', () => { wsClients.delete(ws); });
 });
 
+function shutdownServer() {
+  if (cameraSocket) {
+    try { cameraSocket.destroy(); } catch {}
+    cameraSocket = null;
+  }
+  if (global.usbDevice) {
+    const { device, iface } = global.usbDevice;
+    try {
+      iface.release(true, () => {
+        try { device.close(); } catch {}
+      });
+    } catch {
+      try { device.close(); } catch {}
+    }
+    global.usbDevice = null;
+  }
+  try { httpServer.close(); } catch {}
+}
+
+process.on('SIGINT', () => {
+  shutdownServer();
+  setTimeout(() => process.exit(0), 250);
+});
+process.on('SIGTERM', () => {
+  shutdownServer();
+  setTimeout(() => process.exit(0), 250);
+});
 const PORT = process.env.PORT || 19570;
 httpServer.listen(PORT, '0.0.0.0', () => {
   const os = require('os');
@@ -808,3 +835,5 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('╚══════════════════════════════════════════╝');
   console.log('');
 });
+
+module.exports = { shutdownServer };

@@ -637,7 +637,10 @@ export const camera = {
       const session = await openUsbSession(diag);
       const brand = explicitBrand(requestedBrand) || CAMERA_BRANDS.nikon;
       if (brand.id === 'nikon' && typeof session.prepareForControl === 'function') {
-        await session.prepareForControl({ applicationMode: true }).catch(() => {});
+        // Nikon Z30 answers ChangeApplicationMode in PTP/IP mode, but the
+        // same vendor request times out on its USB PTP interface. Sending it
+        // there leaves an unfinished OUT transfer and corrupts later reads.
+        await session.prepareForControl({ applicationMode: false }).catch(() => {});
       }
       mobileSession = session;
       mobileSessionMode = 'usb';

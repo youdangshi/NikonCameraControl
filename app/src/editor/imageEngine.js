@@ -87,7 +87,7 @@ function blurredCanvas(source, blurPx) {
  */
 export function renderEdited(img, {
   adj = {}, portrait = {}, mask = {}, wheels = {}, lut = null, lutStrength = 100,
-  np3Grading = null, np3ToneCurve = null,
+  np3Grading = null, np3ToneCurve = null, curves = null,
 } = {}, maxDim = 1100) {
   const A = { ...DEFAULT_ADJ, ...adj };
   const P = { ...DEFAULT_PORTRAIT, ...portrait };
@@ -102,10 +102,10 @@ export function renderEdited(img, {
 
   const imageData = ctx.getImageData(0, 0, w, h);
   basicAdjust(imageData, A);
-  applyToneCurve(imageData, A, np3ToneCurve);
+  applyToneCurve(imageData, A, np3ToneCurve, curves);
   applyColorMixer(imageData, A);
   applyDenoise(imageData, A);
-  applyMask(imageData, M, w, h);
+  applyMask(imageData, M, w, h, M.type === 'brush' ? createBrushMaskCanvas(M, w, h) : null);
   applyColorWheels(imageData, W);
   applyNikonGrading(imageData, np3Grading);
   applyLut(imageData, lut, lutStrength);
@@ -228,11 +228,76 @@ function applyUnsharp(data, sharpen, clarity, texture = 0) {
   }
 }
 
-function applyToneCurve(imageData, A, np3ToneCurve = null) {
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Fritsch-Carlson monotone cubic interpolation. It follows the same principle
+ * as professional tone-curve editors: control points are interpolated without
+ * overshoot, so moving one tonal region cannot create accidental clipping or
+ * oscillation in neighbouring regions.
+ */
+export function buildChannelCurveLut(offsets = [0, 0, 0, 0, 0]) {
+  const xs = [0, 0.25, 0.5, 0.75, 1];
+  const ys = xs.map((x, index) => clamp01(x + (Number(offsets[index]) || 0) * 0.005));
+  const n = xs.length;
+  const h = xs.slice(1).map((x, index) => x - xs[index]);
+  const delta = h.map((step, index) => (ys[index + 1] - ys[index]) / step);
+  const slopes = new Array(n).fill(0);
+  slopes[0] = delta[0];
+  slopes[n - 1] = delta[n - 2];
+  for (let index = 1; index < n - 1; index += 1) {
+    if (delta[index - 1] * delta[index] <= 0) {
+      slopes[index] = 0;
+    } else {
+      const w1 = 2 * h[index] + h[index - 1];
+      const w2 = h[index] + 2 * h[index - 1];
+      slopes[index] = (w1 + w2) / (w1 / delta[index - 1] + w2 / delta[index]);
+    }
+  }
+
+  const lut = new Uint8Array(256);
+  for (let sample = 0; sample < 256; sample += 1) {
+    const xValue = sample / 255;
+    let interval = 0;
+    while (interval < n - 2 && xValue > xs[interval + 1]) interval += 1;
+    const t = (xValue - xs[interval]) / h[interval];
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const h00 = 2 * t3 - 3 * t2 + 1;
+    const h10 = t3 - 2 * t2 + t;
+    const h01 = -2 * t3 + 3 * t2;
+    const h11 = t3 - t2;
+    const value = h00 * ys[interval]
+      + h10 * h[interval] * slopes[interval]
+      + h01 * ys[interval + 1]
+      + h11 * h[interval] * slopes[interval + 1];
+    lut[sample] = Math.round(clamp01(value) * 255);
+  }
+  return lut;
+}
+
+function isIdentityCurve(offsets = []) {
+  return offsets.every(value => !Number(value));
+}
+
+function applyToneCurve(imageData, A, np3ToneCurve = null, curves = null) {
   const black = num(A.toneBlack), shadow = num(A.toneShadow), mid = num(A.toneMid);
   const highlight = num(A.toneHighlight), white = num(A.toneWhite);
   const hasNp3Curve = Array.isArray(np3ToneCurve) && np3ToneCurve.length >= 257;
-  if (!hasNp3Curve && !black && !shadow && !mid && !highlight && !white) return;
+  const hasChannelCurves = curves && ['red', 'green', 'blue'].some(key => !isIdentityCurve(curves[key] || []));
+  if (!hasNp3Curve && !hasChannelCurves && !black && !shadow && !mid && !highlight && !white) return;
+
+  const rgbOffsets = curves?.rgb || [black, shadow, mid, highlight, white];
+  const rgbLut = buildChannelCurveLut(rgbOffsets);
+  const channelLuts = curves
+    ? {
+        red: buildChannelCurveLut(curves.red || [0, 0, 0, 0, 0]),
+        green: buildChannelCurveLut(curves.green || [0, 0, 0, 0, 0]),
+        blue: buildChannelCurveLut(curves.blue || [0, 0, 0, 0, 0]),
+      }
+    : null;
 
   const d = imageData.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -244,17 +309,31 @@ function applyToneCurve(imageData, A, np3ToneCurve = null) {
       d[i] = clamp(d[i] + curveDelta, 0, 255);
       d[i + 1] = clamp(d[i + 1] + curveDelta, 0, 255);
       d[i + 2] = clamp(d[i + 2] + curveDelta, 0, 255);
-      continue;
     }
-    const wb = clamp((45 - lum) / 45, 0, 1);
-    const ws = clamp(1 - Math.abs(lum - 85) / 55, 0, 1);
-    const wm = clamp(1 - Math.abs(lum - 142) / 64, 0, 1);
-    const wh = clamp(1 - Math.abs(lum - 198) / 55, 0, 1);
-    const ww = clamp((lum - 215) / 40, 0, 1);
-    const delta = wb * black * 0.45 + ws * shadow * 0.55 + wm * mid * 0.45 + wh * highlight * 0.55 + ww * white * 0.5;
-    d[i] = clamp(d[i] + delta, 0, 255);
-    d[i + 1] = clamp(d[i + 1] + delta, 0, 255);
-    d[i + 2] = clamp(d[i + 2] + delta, 0, 255);
+    if (hasNp3Curve || hasChannelCurves) {
+      const sourceR = clamp(Math.round(d[i]), 0, 255);
+      const sourceG = clamp(Math.round(d[i + 1]), 0, 255);
+      const sourceB = clamp(Math.round(d[i + 2]), 0, 255);
+      if (channelLuts) {
+        d[i] = channelLuts.red[rgbLut[sourceR]];
+        d[i + 1] = channelLuts.green[rgbLut[sourceG]];
+        d[i + 2] = channelLuts.blue[rgbLut[sourceB]];
+      } else {
+        d[i] = rgbLut[sourceR];
+        d[i + 1] = rgbLut[sourceG];
+        d[i + 2] = rgbLut[sourceB];
+      }
+    } else {
+      const wb = clamp((45 - lum) / 45, 0, 1);
+      const ws = clamp(1 - Math.abs(lum - 85) / 55, 0, 1);
+      const wm = clamp(1 - Math.abs(lum - 142) / 64, 0, 1);
+      const wh = clamp(1 - Math.abs(lum - 198) / 55, 0, 1);
+      const ww = clamp((lum - 215) / 40, 0, 1);
+      const delta = wb * black * 0.45 + ws * shadow * 0.55 + wm * mid * 0.45 + wh * highlight * 0.55 + ww * white * 0.5;
+      d[i] = clamp(d[i] + delta, 0, 255);
+      d[i + 1] = clamp(d[i + 1] + delta, 0, 255);
+      d[i + 2] = clamp(d[i + 2] + delta, 0, 255);
+    }
   }
 }
 
@@ -392,7 +471,48 @@ function smoothMask(value) {
   return t * t * (3 - 2 * t);
 }
 
-function applyMask(imageData, M, w, h) {
+function createBrushMaskCanvas(M, w, h) {
+  const strokes = Array.isArray(M.brushStrokes) ? M.brushStrokes : [];
+  if (!strokes.length) return null;
+  const canvas = makeCanvas(w, h);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#fff';
+  ctx.fillStyle = '#fff';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const shortSide = Math.min(w, h);
+  for (const stroke of strokes) {
+    const points = Array.isArray(stroke?.points) ? stroke.points : [];
+    if (!points.length) continue;
+    const width = Math.max(2, shortSide * clamp(num(stroke.size, M.brushSize || 18), 1, 100) / 100);
+    const feather = clamp(num(stroke.feather, M.brushFeather || 45), 0, 100) / 100;
+    ctx.globalAlpha = clamp(num(stroke.opacity, M.brushOpacity || 80), 1, 100) / 100;
+    ctx.lineWidth = width;
+    ctx.shadowColor = 'rgba(255,255,255,0.95)';
+    ctx.shadowBlur = width * feather * 0.8;
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      const x = clamp(num(point.x, 0), 0, 1) * (w - 1);
+      const y = clamp(num(point.y, 0), 0, 1) * (h - 1);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    if (points.length === 1) {
+      const p = points[0];
+      ctx.beginPath();
+      ctx.arc(clamp(num(p.x, 0), 0, 1) * (w - 1), clamp(num(p.y, 0), 0, 1) * (h - 1), width / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  return ctx.getImageData(0, 0, w, h);
+}
+
+function applyMask(imageData, M, w, h, brushMask = null) {
   if (M.type === 'none') return;
   const exposure = num(M.exposure);
   const contrast = num(M.contrast);
@@ -430,6 +550,9 @@ function applyMask(imageData, M, w, h) {
         const projected = 0.5 + dx * Math.cos(angle) + dy * Math.sin(angle);
         const edge = Math.max(0.04, feather * 1.2);
         weight = smoothMask((projected - (position - edge)) / (edge * 2));
+      } else if (M.type === 'brush') {
+        if (!brushMask) continue;
+        weight = brushMask.data[(y * w + x) * 4] / 255;
       } else {
         continue;
       }

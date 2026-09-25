@@ -269,6 +269,16 @@ export const DEFAULT_MASK = {
   contrast: 0,
   saturation: 0,
   temperature: 0,
+  brushSize: 18,
+  brushFeather: 45,
+  brushOpacity: 80,
+  brushStrokes: [],
+};
+
+export const DEFAULT_CHANNEL_CURVES = {
+  red: [0, 0, 0, 0, 0],
+  green: [0, 0, 0, 0, 0],
+  blue: [0, 0, 0, 0, 0],
 };
 
 export const DEFAULT_WHEELS = {

@@ -164,7 +164,7 @@ if (prop.responseCode !== 0x2001) throw new Error('USB data-out phase failed');
 await usb.prepareForControl();
 const usbReady = await usb.waitForDeviceReady(1200);
 if (!usbReady.ready) throw new Error('USB Nikon DeviceReady was not confirmed');
-if (!usbTransport.ops.includes(0x9435) || !usbTransport.ops.includes(0x90c8)) {
+if (usbTransport.ops.includes(0x9435) || !usbTransport.ops.includes(0x90c8)) {
   throw new Error(`USB Nikon control sequence missing: ${usbTransport.ops.map(v => v.toString(16)).join(',')}`);
 }
 await usb.close();

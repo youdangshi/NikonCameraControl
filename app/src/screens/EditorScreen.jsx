@@ -2,15 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   STYLE_PRESETS, PORTRAIT_STEPS, GENRE_GUIDE,
-  DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK, DEFAULT_WHEELS,
+  DEFAULT_ADJ, DEFAULT_PORTRAIT, DEFAULT_MASK, DEFAULT_WHEELS, DEFAULT_CHANNEL_CURVES,
 } from '../editor/presets.js';
-import { renderPreview, exportEdited, loadImage, parseCubeLut } from '../editor/imageEngine.js';
+import { renderPreview, exportEdited, loadImage, parseCubeLut, buildChannelCurveLut } from '../editor/imageEngine.js';
 import { parseNp3 } from '../editor/np3.js';
 import HistogramChart from '../components/HistogramChart.jsx';
 import { HISTOGRAM_BINS } from '../histogram.js';
 import {
   ArrowLeft, BookOpen, Check, CloudSun, Download, ImageOff, Palette, RotateCcw, ScanLine,
-  SlidersHorizontal, Sparkles, UserRound,
+  SlidersHorizontal, Sparkles, UserRound, Undo2, Redo2,
 } from 'lucide-react';
 
 const TABS = [
@@ -209,34 +209,73 @@ const CURVE_POINTS = [
   ['toneWhite', 4],
 ];
 
-function CurveEditor({ adj, histogram, onChange }) {
+const CURVE_CHANNELS = [
+  { id: 'rgb', label: 'RGB', color: '#f4f4f5' },
+  { id: 'red', label: '红', color: '#ef4444' },
+  { id: 'green', label: '绿', color: '#22c55e' },
+  { id: 'blue', label: '蓝', color: '#3b82f6' },
+];
+
+function CurveEditor({
+  adj, channelCurves, channel, onChannelChange, histogram,
+  onChange, onResetChannel, onApplyShape,
+}) {
   const [dragging, setDragging] = useState(null);
   const width = 320;
   const height = 178;
   const pad = 18;
+  const activeMeta = CURVE_CHANNELS.find(item => item.id === channel) || CURVE_CHANNELS[0];
+  const activeOffsets = channel === 'rgb'
+    ? CURVE_POINTS.map(([key]) => clampValue(adj[key]))
+    : (channelCurves[channel] || [0, 0, 0, 0, 0]);
   const coordinates = CURVE_POINTS.map(([key], index) => {
     const x = pad + index * ((width - pad * 2) / (CURVE_POINTS.length - 1));
-    const y = pad + (1 - (clampValue(adj[key]) + 100) / 200) * (height - pad * 2);
-    return { key, x, y };
+    const y = pad + (1 - (clampValue(activeOffsets[index]) + 100) / 200) * (height - pad * 2);
+    return { key, x, y, value: activeOffsets[index] };
   });
 
   const updatePoint = (event, index) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const localY = (event.clientY - rect.top) * (height / rect.height);
     const t = clampValue(1 - (localY - pad) / (height - pad * 2));
-    onChange(CURVE_POINTS[index][0], Math.round((t * 2 - 1) * 100));
+    onChange(index, Math.round((t * 2 - 1) * 100));
   };
 
-  const linePath = coordinates.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+  const lut = buildChannelCurveLut(activeOffsets);
+  const linePath = Array.from(lut)
+    .map((value, sample) => {
+      if (sample % 4 !== 0 && sample !== 255) return null;
+      const x = pad + (sample / 255) * (width - pad * 2);
+      const y = pad + (1 - value / 255) * (height - pad * 2);
+      return `${sample === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div className="mb-4 rounded-md border border-[var(--line)] bg-[#0b0e11] p-3">
       <div className="flex items-center justify-between mb-2">
         <div>
-          <p className="text-xs font-semibold">曲线</p>
-          <p className="text-[9px] text-[var(--text-muted)] mt-0.5">拖动五个控制点调整黑场到白场</p>
+          <p className="text-xs font-semibold">曲线 · {activeMeta.label}</p>
+          <p className="text-[9px] text-[var(--text-muted)] mt-0.5">黑场、阴影、中间调、高光、白场五点单调曲线</p>
         </div>
         <HistogramChart histogram={histogram} compact />
+      </div>
+      <div className="flex items-center gap-2 mb-2">
+        <div className="grid grid-cols-4 gap-1 flex-1">
+          {CURVE_CHANNELS.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              className={`rounded border px-2 py-1.5 text-[10px] font-semibold ${channel === item.id ? 'border-white/35 bg-white/10' : 'border-[var(--line)] bg-black/20 text-[var(--text-muted)]'}`}
+              style={channel === item.id ? { color: item.color } : undefined}
+              onClick={() => onChannelChange(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="btn btn-ghost px-2 py-1.5 text-[10px]" onClick={onResetChannel}>复位</button>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
@@ -252,14 +291,14 @@ function CurveEditor({ adj, histogram, onChange }) {
           <line key={`h${i}`} x1={pad} y1={(height / 5) * i} x2={width - pad} y2={(height / 5) * i} stroke="rgba(255,255,255,.06)" />
         ))}
         <line x1={pad} y1={height - pad} x2={width - pad} y2={pad} stroke="rgba(255,255,255,.12)" strokeDasharray="4 5" />
-        <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth="2.2" />
+        <path d={linePath} fill="none" stroke={activeMeta.color} strokeWidth="2.2" />
         {coordinates.map((point, index) => (
           <circle
             key={point.key}
             cx={point.x}
             cy={point.y}
             r={dragging === index ? 8 : 6}
-            fill="var(--accent)"
+            fill={activeMeta.color}
             stroke="#0b0e11"
             strokeWidth="2"
             className="cursor-ns-resize"
@@ -271,11 +310,16 @@ function CurveEditor({ adj, histogram, onChange }) {
           />
         ))}
       </svg>
+      <div className="grid grid-cols-3 gap-2 mt-2">
+        <button type="button" className="btn btn-secondary px-2 py-1.5 text-[10px]" onClick={() => onApplyShape([-18, -8, 0, 8, 18])}>轻微 S 曲线</button>
+        <button type="button" className="btn btn-secondary px-2 py-1.5 text-[10px]" onClick={() => onApplyShape([18, 8, 0, -8, -18])}>反 S 曲线</button>
+        <button type="button" className="btn btn-secondary px-2 py-1.5 text-[10px]" onClick={() => onApplyShape([-24, 0, 0, 0, 24])}>增强黑白场</button>
+      </div>
       <div className="grid grid-cols-5 gap-1 text-center mt-2">
-        {CURVE_POINTS.map(([key, index]) => (
+        {CURVE_POINTS.map(([key], index) => (
           <div key={key}>
             <p className="text-[9px] text-[var(--text-muted)]">{PS_GROUPS[3].items[index][1]}</p>
-            <p className="mono text-[10px] mt-0.5">{adj[key] > 0 ? '+' : ''}{adj[key]}</p>
+            <p className="mono text-[10px] mt-0.5">{activeOffsets[index] > 0 ? '+' : ''}{activeOffsets[index]}</p>
           </div>
         ))}
       </div>
@@ -298,6 +342,13 @@ export default function EditorScreen() {
   const [psGroup, setPsGroup] = useState('light');
   const [quickStrength, setQuickStrength] = useState(70);
   const [adj, setAdj] = useState({ ...DEFAULT_ADJ });
+  const [channelCurves, setChannelCurves] = useState({
+    red: [...DEFAULT_CHANNEL_CURVES.red],
+    green: [...DEFAULT_CHANNEL_CURVES.green],
+    blue: [...DEFAULT_CHANNEL_CURVES.blue],
+  });
+  const [curveChannel, setCurveChannel] = useState('rgb');
+  const [brushDraft, setBrushDraft] = useState(null);
   const [portrait, setPortrait] = useState({ ...DEFAULT_PORTRAIT });
   const [mask, setMask] = useState({ ...DEFAULT_MASK });
   const [wheels, setWheels] = useState({ ...DEFAULT_WHEELS });
@@ -316,6 +367,80 @@ export default function EditorScreen() {
   const lutRef = useRef(null);
   const np3Ref = useRef(null);
   const renderTimer = useRef(null);
+  const historyTimer = useRef(null);
+  const brushDrawingRef = useRef(false);
+  const historyRef = useRef([]);
+  const historyIndexRef = useRef(-1);
+  const [historyVersion, setHistoryVersion] = useState(0);
+
+  const currentSnapshot = () => ({
+    adj, portrait, mask, wheels, lut, lutStrength, np3Preset, channelCurves,
+  });
+
+  const restoreSnapshot = (snapshot) => {
+    if (!snapshot) return;
+    setAdj(snapshot.adj);
+    setPortrait(snapshot.portrait);
+    setMask(snapshot.mask);
+    setWheels(snapshot.wheels);
+    setLut(snapshot.lut);
+    setLutStrength(snapshot.lutStrength);
+    setNp3Preset(snapshot.np3Preset);
+    setChannelCurves(snapshot.channelCurves || {
+      red: [...DEFAULT_CHANNEL_CURVES.red],
+      green: [...DEFAULT_CHANNEL_CURVES.green],
+      blue: [...DEFAULT_CHANNEL_CURVES.blue],
+    });
+  };
+
+  const commitHistory = (snapshot) => {
+    const keys = ['adj', 'portrait', 'mask', 'wheels', 'lut', 'lutStrength', 'np3Preset', 'channelCurves'];
+    const current = historyRef.current[historyIndexRef.current];
+    if (current && keys.every(key => current[key] === snapshot[key])) return;
+    const next = historyRef.current.slice(0, historyIndexRef.current + 1);
+    next.push(snapshot);
+    historyRef.current = next.slice(-40);
+    historyIndexRef.current = historyRef.current.length - 1;
+    setHistoryVersion(value => value + 1);
+  };
+
+  const undo = () => {
+    if (historyIndexRef.current <= 0) return;
+    historyIndexRef.current -= 1;
+    restoreSnapshot(historyRef.current[historyIndexRef.current]);
+    setHistoryVersion(value => value + 1);
+    setMsg('已撤销');
+  };
+
+  const redo = () => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    historyIndexRef.current += 1;
+    restoreSnapshot(historyRef.current[historyIndexRef.current]);
+    setHistoryVersion(value => value + 1);
+    setMsg('已重做');
+  };
+
+  useEffect(() => {
+    if (!source) return undefined;
+    if (historyTimer.current) clearTimeout(historyTimer.current);
+    historyTimer.current = setTimeout(() => commitHistory(currentSnapshot()), 380);
+    return () => { if (historyTimer.current) clearTimeout(historyTimer.current); };
+    // Snapshot is intentionally committed after slider interaction pauses.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, adj, portrait, mask, wheels, lut, lutStrength, np3Preset, channelCurves]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo(); else undo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!source && fileRef.current) {} // no-op，占位避免 lint
@@ -371,6 +496,10 @@ export default function EditorScreen() {
           adj, portrait, mask, wheels, lut, lutStrength,
           np3Grading: np3Preset?.grading || null,
           np3ToneCurve: np3Preset?.toneCurve || null,
+          curves: {
+            rgb: CURVE_POINTS.map(([key]) => adj[key]),
+            ...channelCurves,
+          },
         });
         setPreview(canvas.toDataURL('image/jpeg', 0.88));
       } catch (e) {
@@ -380,7 +509,7 @@ export default function EditorScreen() {
       }
     }, 140);
     return () => { if (renderTimer.current) clearTimeout(renderTimer.current); };
-  }, [source, adj, portrait, mask, wheels, lut, lutStrength, np3Preset]);
+  }, [source, adj, portrait, mask, wheels, lut, lutStrength, np3Preset, channelCurves]);
 
   const pickFile = (e) => {
     const file = e.target.files?.[0];
@@ -389,7 +518,14 @@ export default function EditorScreen() {
     reader.onload = () => {
       const url = String(reader.result);
       setSource(url); setName(file.name); setMsg('');
-      setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setWheels({ ...DEFAULT_WHEELS }); setLut(null); setLutStrength(100); setNp3Preset(null); setOriginal('');
+      setAdj({ ...DEFAULT_ADJ });
+      setPortrait({ ...DEFAULT_PORTRAIT });
+      setMask({ ...DEFAULT_MASK });
+      setWheels({ ...DEFAULT_WHEELS });
+      setChannelCurves({ red: [...DEFAULT_CHANNEL_CURVES.red], green: [...DEFAULT_CHANNEL_CURVES.green], blue: [...DEFAULT_CHANNEL_CURVES.blue] });
+      setLut(null); setLutStrength(100); setNp3Preset(null); setOriginal('');
+      historyRef.current = [];
+      historyIndexRef.current = -1;
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -431,11 +567,43 @@ export default function EditorScreen() {
     e.target.value = '';
   };
 
-  const reset = () => { setAdj({ ...DEFAULT_ADJ }); setPortrait({ ...DEFAULT_PORTRAIT }); setMask({ ...DEFAULT_MASK }); setWheels({ ...DEFAULT_WHEELS }); setLut(null); setLutStrength(100); setNp3Preset(null); setMsg('已重置'); };
+  const reset = () => {
+    setAdj({ ...DEFAULT_ADJ });
+    setPortrait({ ...DEFAULT_PORTRAIT });
+    setMask({ ...DEFAULT_MASK });
+    setWheels({ ...DEFAULT_WHEELS });
+    setChannelCurves({ red: [...DEFAULT_CHANNEL_CURVES.red], green: [...DEFAULT_CHANNEL_CURVES.green], blue: [...DEFAULT_CHANNEL_CURVES.blue] });
+    setLut(null); setLutStrength(100); setNp3Preset(null); setMsg('已重置');
+  };
   const setAdjField = (k, v) => setAdj(a => ({ ...a, [k]: v }));
   const setPortraitField = (k, v) => setPortrait(p => ({ ...p, [k]: v }));
   const setMaskField = (k, v) => setMask(current => ({ ...current, [k]: v }));
   const setWheelField = (k, v) => setWheels(current => ({ ...current, [k]: v }));
+  const setCurveOffset = (index, value) => {
+    if (curveChannel === 'rgb') {
+      setAdjField(CURVE_POINTS[index][0], value);
+      return;
+    }
+    setChannelCurves(current => {
+      const next = [...(current[curveChannel] || [0, 0, 0, 0, 0])];
+      next[index] = value;
+      return { ...current, [curveChannel]: next };
+    });
+  };
+  const resetActiveCurve = () => {
+    if (curveChannel === 'rgb') {
+      CURVE_POINTS.forEach(([key]) => setAdjField(key, 0));
+      return;
+    }
+    setChannelCurves(current => ({ ...current, [curveChannel]: [0, 0, 0, 0, 0] }));
+  };
+  const applyActiveCurveShape = (offsets) => {
+    if (curveChannel === 'rgb') {
+      CURVE_POINTS.forEach(([key], index) => setAdjField(key, offsets[index]));
+      return;
+    }
+    setChannelCurves(current => ({ ...current, [curveChannel]: [...offsets] }));
+  };
 
   const applyPreset = (preset) => {
     if (preset.category === '人像') {
@@ -470,6 +638,10 @@ export default function EditorScreen() {
         adj, portrait, mask, wheels, lut, lutStrength,
         np3Grading: np3Preset?.grading || null,
         np3ToneCurve: np3Preset?.toneCurve || null,
+        curves: {
+          rgb: CURVE_POINTS.map(([key]) => adj[key]),
+          ...channelCurves,
+        },
       });
       const a = document.createElement('a');
       a.href = dataUrl;
@@ -498,6 +670,64 @@ export default function EditorScreen() {
     setMsg(`已应用「${preset.name}」· ${quickStrength}%`);
   };
 
+  const pointFromPointer = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  const beginBrushStroke = (event) => {
+    if (mask.type !== 'brush') {
+      setCompare(false);
+      return;
+    }
+    const point = pointFromPointer(event);
+    if (!point) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    brushDrawingRef.current = true;
+    const stroke = {
+      points: [point],
+      size: mask.brushSize,
+      feather: mask.brushFeather,
+      opacity: mask.brushOpacity,
+    };
+    setBrushDraft(stroke);
+  };
+
+  const moveBrushStroke = (event) => {
+    if (!brushDrawingRef.current || !brushDraft) return;
+    const point = pointFromPointer(event);
+    if (!point) return;
+    setBrushDraft(current => {
+      if (!current) return current;
+      const previous = current.points[current.points.length - 1];
+      if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) < 0.006) return current;
+      return { ...current, points: [...current.points, point].slice(-260) };
+    });
+  };
+
+  const finishBrushStroke = () => {
+    if (!brushDrawingRef.current) {
+      setCompare(true);
+      return;
+    }
+    brushDrawingRef.current = false;
+    if (brushDraft?.points?.length) {
+      setMask(current => ({
+        ...current,
+        brushStrokes: [...(current.brushStrokes || []), brushDraft].slice(-48),
+      }));
+    }
+    setBrushDraft(null);
+  };
+
+  const canUndo = historyVersion >= 0 && historyIndexRef.current > 0;
+  const canRedo = historyVersion >= 0 && historyIndexRef.current >= 0 && historyIndexRef.current < historyRef.current.length - 1;
+
   return (
     <div className="h-full flex flex-col bg-[var(--app-bg)] overflow-hidden">
       {/* 顶部栏 */}
@@ -507,6 +737,8 @@ export default function EditorScreen() {
           <p className="text-sm font-semibold truncate">修图工作台</p>
           <p className="text-[10px] text-[var(--text-muted)] truncate">{name}</p>
         </div>
+        <button className="btn-icon" onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)"><Undo2 size={16} /></button>
+        <button className="btn-icon" onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)"><Redo2 size={16} /></button>
         <button className="btn btn-ghost text-xs" onClick={reset}><RotateCcw size={14} /> 重置</button>
         <button className="btn btn-primary text-xs" onClick={doExport} disabled={!source || exporting}>
           {exporting ? <Check size={14} /> : <Download size={14} />}{exporting ? '导出中' : '导出'}
@@ -524,19 +756,40 @@ export default function EditorScreen() {
           </div>
         ) : (
           <div
-            className="w-full h-full flex items-center justify-center relative cursor-crosshair"
-            onPointerDown={() => setCompare(false)}
-            onPointerUp={() => setCompare(true)}
-            onPointerLeave={() => setCompare(false)}
+            className="w-full h-full flex items-center justify-center relative"
           >
-            <img
-              src={compare && original ? original : preview}
-              alt="预览"
-              className="max-w-full max-h-full object-contain"
-              style={{ opacity: rendering ? 0.55 : 1, transition: 'opacity .15s' }}
-            />
+            <div
+              className={`relative inline-flex max-w-full max-h-full touch-none ${mask.type === 'brush' ? 'cursor-crosshair' : 'cursor-pointer'}`}
+              onPointerDown={beginBrushStroke}
+              onPointerMove={moveBrushStroke}
+              onPointerUp={finishBrushStroke}
+              onPointerLeave={finishBrushStroke}
+            >
+              <img
+                src={compare && original ? original : preview}
+                alt="预览"
+                className="max-w-full max-h-full object-contain"
+                style={{ opacity: rendering ? 0.55 : 1, transition: 'opacity .15s' }}
+              />
+              {mask.type === 'brush' && (
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none">
+                  {[...(mask.brushStrokes || []), ...(brushDraft ? [brushDraft] : [])].map((stroke, index) => {
+                    const points = stroke.points || [];
+                    const path = points.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'} ${point.x * 100} ${point.y * 100}`).join(' ');
+                    return (
+                      <g key={index}>
+                        {points.length > 1 && <path d={path} fill="none" stroke="rgba(0,0,0,.62)" strokeWidth={Number(stroke.size || 18) + 1.2} strokeLinecap="round" strokeLinejoin="round" />}
+                        {points.length > 1 && <path d={path} fill="none" stroke="rgba(255,255,255,.82)" strokeWidth={stroke.size || 18} strokeLinecap="round" strokeLinejoin="round" />}
+                        {points.length === 1 && <circle cx={points[0].x * 100} cy={points[0].y * 100} r={(stroke.size || 18) / 2} fill="rgba(255,255,255,.82)" stroke="rgba(0,0,0,.62)" strokeWidth="1" />}
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
+            </div>
             {compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/70 border border-white/10 text-[10px]">原图</span>}
             {!compare && <span className="absolute top-3 left-3 px-2 py-1 rounded bg-black/70 border border-white/10 text-[10px]">效果预览</span>}
+            {mask.type === 'brush' && <span className="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/70 border border-white/10 text-[10px]">在画面上拖动绘制蒙版</span>}
             {histogram && (
               <div className="absolute top-3 right-3 z-10">
                 <HistogramChart histogram={histogram} compact />
@@ -585,7 +838,16 @@ export default function EditorScreen() {
               </div>
               {psGroup === 'curve' ? (
                 <>
-                  <CurveEditor adj={adj} histogram={histogram} onChange={setAdjField} />
+                  <CurveEditor
+                    adj={adj}
+                    channelCurves={channelCurves}
+                    channel={curveChannel}
+                    onChannelChange={setCurveChannel}
+                    histogram={histogram}
+                    onChange={setCurveOffset}
+                    onResetChannel={resetActiveCurve}
+                    onApplyShape={applyActiveCurveShape}
+                  />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
                     {(PS_GROUPS.find(group => group.id === 'curve')?.items || []).map(([key, label]) => (
                       <Slider key={key} label={label} value={adj[key]} onChange={value => setAdjField(key, value)} />
@@ -637,11 +899,12 @@ export default function EditorScreen() {
 
           {tab === 'mask' && (
             <div>
-              <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="grid grid-cols-4 gap-2 mb-4">
                 {[
                   ['none', '关闭'],
                   ['radial', '径向蒙版'],
                   ['linear', '线性蒙版'],
+                  ['brush', '画笔蒙版'],
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -656,7 +919,7 @@ export default function EditorScreen() {
               {mask.type === 'none' ? (
                 <div className="panel p-4 text-center">
                   <ScanLine size={22} className="mx-auto text-[var(--text-muted)]" />
-                  <p className="text-[11px] text-[var(--text-soft)] mt-2">选择径向或线性蒙版后，可只调整画面局部。</p>
+                  <p className="text-[11px] text-[var(--text-soft)] mt-2">选择径向、线性或画笔蒙版后，可只调整画面局部。</p>
                 </div>
               ) : (
                 <>
@@ -681,6 +944,17 @@ export default function EditorScreen() {
                         <Slider label="渐变位置" value={mask.position} min={0} max={100} onChange={value => setMaskField('position', value)} />
                         <Slider label="渐变角度" value={mask.angle} min={-180} max={180} onChange={value => setMaskField('angle', value)} />
                         <Slider label="过渡范围" value={mask.feather} min={0} max={100} onChange={value => setMaskField('feather', value)} />
+                      </>
+                    )}
+                    {mask.type === 'brush' && (
+                      <>
+                        <Slider label="画笔大小" value={mask.brushSize} min={2} max={60} onChange={value => setMaskField('brushSize', value)} />
+                        <Slider label="画笔羽化" value={mask.brushFeather} min={0} max={100} onChange={value => setMaskField('brushFeather', value)} />
+                        <Slider label="画笔不透明度" value={mask.brushOpacity} min={5} max={100} onChange={value => setMaskField('brushOpacity', value)} />
+                        <div className="sm:col-span-2 flex items-center justify-between gap-3">
+                          <p className="text-[10px] text-[var(--text-muted)]">已记录 {(mask.brushStrokes || []).length} 条笔画</p>
+                          <button className="btn btn-secondary px-3 py-1.5 text-[10px]" type="button" onClick={() => setMaskField('brushStrokes', [])}>清除笔画</button>
+                        </div>
                       </>
                     )}
                   </div>

@@ -73,6 +73,7 @@ public class UsbPtpPlugin extends Plugin {
   private UsbRequest outRequest;
   private ByteBuffer pendingInBuffer;
   private ByteBuffer pendingOutBuffer;
+  private volatile boolean outRequestActive = false;
   private volatile boolean useRequestMode = false;
   private volatile boolean running = false;
   private Thread readerThread;
@@ -500,6 +501,7 @@ public class UsbPtpPlugin extends Plugin {
       }
 
       ByteBuffer buffer = ByteBuffer.allocateDirect(length);
+      if (outRequestActive) cancelPendingOut();
       buffer.put(bytes, offset, length);
       buffer.flip();
       // 保持强引用：native 层直接用这个直接缓冲的内存地址，被回收就会写出垃圾。
@@ -512,13 +514,16 @@ public class UsbPtpPlugin extends Plugin {
       }
       if (!queued) {
         pendingOutBuffer = null;
+        outRequestActive = false;
         int written = connection.bulkTransfer(outEp, bytes, offset, length, Math.max(500, timeoutMs));
         if (written <= 0) throw new IllegalStateException("USB 写入端点在重试后仍不可用，请重新插拔相机数据线");
         offset += written;
         continue;
       }
 
+      outRequestActive = true;
       UsbRequest done = awaitOutCompletion(Math.max(500, timeoutMs));
+      outRequestActive = false;
       pendingOutBuffer = null;
       if (done == null) {
         throw new IllegalStateException("USB 命令发送超时，请重新插拔相机数据线后重试");
@@ -533,18 +538,32 @@ public class UsbPtpPlugin extends Plugin {
     long deadline = System.currentTimeMillis() + Math.max(1, timeoutMs);
     while (true) {
       long left = deadline - System.currentTimeMillis();
-      if (left <= 0) return null;
+      if (left <= 0) {
+        cancelPendingOut();
+        return null;
+      }
       UsbRequest done;
       try {
         done = connection.requestWait(left);
       } catch (Exception e) {
         Log.w(TAG, "requestWait(写) 失败：" + e);
+        cancelPendingOut();
         return null;
       }
-      if (done == null) return null;
+      if (done == null) {
+        cancelPendingOut();
+        return null;
+      }
       if (done == outRequest) return done;
       Log.d(TAG, "忽略非写入端点完成事件");
     }
+  }
+
+  private void cancelPendingOut() {
+    pendingOutBuffer = null;
+    outRequestActive = false;
+    try { if (outRequest != null) outRequest.cancel(); } catch (Exception ignored) {}
+    try { if (connection != null) connection.requestWait(0); } catch (Exception ignored) {}
   }
 
   /**

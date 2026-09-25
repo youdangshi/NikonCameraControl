@@ -799,7 +799,7 @@ export class PtpUsbSession {
     return resp;
   }
 
-  async prepareForControl({ applicationMode = true } = {}) {
+  async prepareForControl({ applicationMode = false } = {}) {
     let info = null;
     let appMode = null;
     try {

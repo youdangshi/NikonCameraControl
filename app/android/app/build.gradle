@@ -7,8 +7,8 @@ android {
         applicationId "com.nikon.camera.control"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 25
-        versionName "1.7.0"
+        versionCode 26
+        versionName "1.8.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +16,22 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        // Public test-only key. It exists so every test APK has the same
+        // signature and future releases can update previous installs.
+        stableTest {
+            storeFile file('nini-test.keystore')
+            storePassword 'nini-test'
+            keyAlias 'nini-test'
+            keyPassword 'nini-test'
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.stableTest
+        }
         release {
+            signingConfig signingConfigs.stableTest
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

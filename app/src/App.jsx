@@ -9,6 +9,7 @@ import LiveViewScreen from './screens/LiveViewScreen.jsx';
 import ControlScreen from './screens/ControlScreen.jsx';
 import SettingsScreen from './screens/SettingsScreen.jsx';
 import EditorScreen from './screens/EditorScreen.jsx';
+import PhoneCameraScreen from './screens/PhoneCameraScreen.jsx';
 import BottomNav from './components/BottomNav.jsx';
 import { Aperture, Settings } from 'lucide-react';
 
@@ -101,8 +102,8 @@ export default function App() {
 
 function Shell() {
   const loc = useLocation();
-  const hideNav = ['/liveview', '/control', '/editor'].includes(loc.pathname);
-  const hideTopBar = loc.pathname === '/liveview';
+  const hideNav = ['/liveview', '/control', '/editor', '/phone-camera'].includes(loc.pathname);
+  const hideTopBar = ['/liveview', '/phone-camera'].includes(loc.pathname);
   return (
     <div className="h-screen w-screen flex flex-col app-shell overflow-hidden">
       {!hideTopBar && <TopBar />}
@@ -113,6 +114,7 @@ function Shell() {
           <Route path="/photos" element={<CameraPhotosScreen />} />
           <Route path="/sync" element={<SyncScreen />} />
           <Route path="/local" element={<LocalMediaScreen />} />
+          <Route path="/phone-camera" element={<PhoneCameraScreen />} />
           <Route path="/liveview" element={<LiveViewScreen />} />
           <Route path="/control" element={<ControlScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />

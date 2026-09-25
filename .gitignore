@@ -33,6 +33,7 @@ local.properties
 .npmrc
 .npmrc.*
 *.keystore
+!app/android/app/nini-test.keystore
 *.jks
 *.p12
 *.pfx

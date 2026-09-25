@@ -82,6 +82,23 @@ export default function HomeScreen() {
           )}
         </section>
 
+        <section className="panel overflow-hidden">
+          <button
+            type="button"
+            className="w-full p-4 flex items-center gap-3 text-left"
+            onClick={() => navigate('/phone-camera')}
+          >
+            <span className="w-10 h-10 rounded-lg bg-[var(--accent-soft)] border border-[rgba(255,212,0,.24)] flex items-center justify-center flex-shrink-0">
+              <Camera size={20} className="text-[var(--accent)]" />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-semibold">手机相机</span>
+              <span className="block text-[10px] text-[var(--text-muted)] mt-1">使用手机前后镜头拍照，自动保存并进入修图</span>
+            </span>
+            <ChevronRight size={16} className="text-[var(--text-muted)]" />
+          </button>
+        </section>
+
         <section className="panel">
           <div className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
             <div>

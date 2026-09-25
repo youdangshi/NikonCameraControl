@@ -4,7 +4,7 @@
 
 妮妮通过 USB Type-C、相机 WiFi 热点或 STA 局域网连接相机，在手机上完成实时取景、曝光参数控制、自动对焦、遥控拍摄、相机照片读取和本地修图。项目重点解决 Nikon Z30 真机控制链路，并为后续多机型、多品牌适配建立独立协议层。
 
-> 当前版本：`v1.7.0`
+> 当前版本：`v1.8.0`
 > <br>
 > 真机验证设备：Nikon Z30 + Redmi M2011K2C（Android 13）
 > <br>
@@ -40,6 +40,14 @@
 - 相机照片可直接进入修图器。
 - 连接档案与历史连接记录分离保存。
 
+### 手机相机
+
+- 直接调用 Android 系统相机使用手机镜头拍照。
+- 支持前置和后置摄像头切换。
+- 拍摄后自动保存到系统相册。
+- 拍完可以直接进入妮妮修图器。
+- 首页和本地照片页均提供手机拍照入口。
+
 ### 本地修图
 
 - 基础调色：曝光、对比度、高光、阴影、白色、黑色、色温、色调、饱和度、自然饱和度、清晰度、纹理、去雾、降噪、锐化、暗角和颗粒。
@@ -72,9 +80,9 @@
 
 https://github.com/youdangshi/NikonCameraControl/releases/latest
 
-当前 `v1.7.0` 安装包：
+当前 `v1.8.0` 安装包：
 
-https://github.com/youdangshi/NikonCameraControl/releases/download/v1.7.0/Nini-1.7.0-debug.apk
+https://github.com/youdangshi/NikonCameraControl/releases/download/v1.8.0/Nini-1.8.0-debug.apk
 
 要求：
 
@@ -82,7 +90,7 @@ https://github.com/youdangshi/NikonCameraControl/releases/download/v1.7.0/Nini-1
 - USB 模式需要手机支持 USB Host / OTG，并使用支持数据传输的 Type-C 线。
 - 安装时需要允许当前文件管理器“安装未知应用”。
 
-当前安装包为 debug 签名测试版，适合真机体验和开发验证，不适合应用商店正式分发。
+当前安装包使用项目固定的测试签名，可以连续覆盖升级；该签名仅用于测试，不适合应用商店正式分发。
 
 ## 连接方式
 
@@ -218,7 +226,7 @@ GitHub Actions 会在 `main` 分支收到包含 `[release]` 的提交后构建 A
 - STA 智能设备模式只用于照片传输。
 - 部分 Nikon 机型对快门、光圈、对象句柄和取景事件的处理不同。
 - Canon、Sony、Fujifilm 尚未完成真机控制验证。
-- 当前 APK 使用 Android debug 签名。
+- 当前 APK 使用项目固定测试签名。
 
 ## 安全与隐私
 

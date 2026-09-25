@@ -53,7 +53,10 @@ export default function LocalMediaScreen() {
             <p className="section-label">本地摄影库</p>
             <h1 className="text-xl font-bold mt-1">本地照片</h1>
           </div>
-          <button className="btn btn-primary" onClick={() => inputRef.current?.click()}><ImagePlus size={15} /> 导入</button>
+          <div className="flex gap-2">
+            <button className="btn btn-secondary" onClick={() => navigate('/phone-camera')}><FileImage size={15} /> 手机拍照</button>
+            <button className="btn btn-primary" onClick={() => inputRef.current?.click()}><ImagePlus size={15} /> 导入</button>
+          </div>
           <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={pick} />
         </div>
 

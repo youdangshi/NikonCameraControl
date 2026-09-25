@@ -10,21 +10,6 @@
 > <br>
 > USB 实时取景实测：`30 FPS`
 
-## 界面预览
-
-<table>
-  <tr>
-    <td width="50%">
-      <img src="docs/images/control-dashboard-usb.png" alt="USB 相机控制台" />
-      <p align="center">USB 连接与相机状态</p>
-    </td>
-    <td width="50%">
-      <img src="docs/images/live-view-usb-30fps.png" alt="USB 实时取景 30 FPS" />
-      <p align="center">实时取景、直方图和曝光控制</p>
-    </td>
-  </tr>
-</table>
-
 ## 主要能力
 
 ### 相机连接

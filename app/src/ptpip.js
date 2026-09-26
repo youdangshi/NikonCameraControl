@@ -495,6 +495,7 @@ export class PtpIpSession {
     }
 
     const resp = await this.command(0x1002, [1], 10000); // OpenSession
+    this.opened = true;
     this.startHeartbeat();
     if (resp.responseCode !== 0x2001 && resp.responseCode !== 0x201E) {
       throw new Error(`OpenSession 返回 0x${resp.responseCode.toString(16)}`);

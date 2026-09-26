@@ -615,7 +615,7 @@ export default function LiveViewScreen() {
           </div>
         </div>
 
-        {lvError && frame && (
+        {lvError && hasFrame && (
           <div className="absolute left-3 right-3 top-[84px] z-30 rounded-md bg-[var(--red)]/90 px-3 py-2 text-[11px] text-white shadow-lg">
             {lvError}
           </div>

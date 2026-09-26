@@ -2,6 +2,8 @@ package com.nikon.camera.control;
 
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.util.Base64;
@@ -16,6 +18,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -52,7 +55,7 @@ public class TcpSocketPlugin extends Plugin {
     }
   }
 
-  private final Map<String, Channel> channels = new ConcurrentHashMap<>();
+  private static final Map<String, Channel> channels = new ConcurrentHashMap<>();
 
   @PluginMethod
   public void connect(PluginCall call) {
@@ -64,14 +67,18 @@ public class TcpSocketPlugin extends Plugin {
       return;
     }
 
-    closeChannel(channelName);
+    if (DEFAULT_CHANNEL.equals(channelName)) {
+      closeAllChannels();
+    } else {
+      closeChannel(channelName);
+    }
     Channel channel = new Channel(channelName);
     channels.put(channelName, channel);
 
     new Thread(() -> {
       try {
         Socket socket = new Socket();
-        boolean boundToWifi = bindSocketToCameraNetwork(socket);
+        boolean boundToWifi = bindSocketToCameraNetwork(socket, host);
         socket.setReuseAddress(true);
         socket.connect(new InetSocketAddress(host, port), 8000);
         socket.setTcpNoDelay(true);
@@ -182,6 +189,12 @@ public class TcpSocketPlugin extends Plugin {
     emitState(name, "disconnected", null, null);
   }
 
+  private void closeAllChannels() {
+    for (String name : channels.keySet()) {
+      closeChannel(name);
+    }
+  }
+
   private void closeSocket(Socket socket) {
     if (socket == null) return;
     try { socket.close(); } catch (IOException ignored) {}
@@ -192,29 +205,65 @@ public class TcpSocketPlugin extends Plugin {
    * no Internet access. Binding the PTP/IP sockets to the Wi-Fi Network keeps
    * command and event traffic on the camera link.
    */
-  private boolean bindSocketToCameraNetwork(Socket socket) {
+  private boolean bindSocketToCameraNetwork(Socket socket, String host) {
     try {
       ConnectivityManager manager = (ConnectivityManager) getContext()
           .getSystemService(Context.CONNECTIVITY_SERVICE);
       if (manager == null) return false;
       Network[] networks = manager.getAllNetworks();
+      Network fallbackNetwork = null;
       for (Network network : networks) {
         NetworkCapabilities capabilities = manager.getNetworkCapabilities(network);
         if (capabilities == null
             || !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
           continue;
         }
+        fallbackNetwork = network;
+        if (networkHandlesHost(manager, network, host)) {
+          try {
+            network.bindSocket(socket);
+            return true;
+          } catch (IOException ignored) {
+          }
+        }
+      }
+      if (fallbackNetwork != null) {
         try {
-          network.bindSocket(socket);
+          fallbackNetwork.bindSocket(socket);
           return true;
         } catch (IOException ignored) {
-          // Try the next Wi-Fi network if this device exposes more than one.
         }
       }
     } catch (Exception ignored) {
       // Binding is an optimisation; the normal route remains a safe fallback.
     }
     return false;
+  }
+
+  private boolean networkHandlesHost(ConnectivityManager manager, Network network, String host) {
+    try {
+      LinkProperties properties = manager.getLinkProperties(network);
+      InetAddress target = InetAddress.getByName(host);
+      byte[] targetBytes = target.getAddress();
+      if (targetBytes.length != 4) return false;
+      int targetValue = ipv4ToInt(targetBytes);
+      for (LinkAddress linkAddress : properties.getLinkAddresses()) {
+        byte[] localBytes = linkAddress.getAddress().getAddress();
+        if (localBytes.length != 4) continue;
+        int prefixLength = linkAddress.getPrefixLength();
+        int mask = prefixLength == 0 ? 0 : 0xFFFFFFFF << (32 - prefixLength);
+        if ((ipv4ToInt(localBytes) & mask) == (targetValue & mask)) return true;
+      }
+    } catch (Exception ignored) {
+    }
+    return false;
+  }
+
+  private int ipv4ToInt(byte[] bytes) {
+    return ((bytes[0] & 0xFF) << 24)
+        | ((bytes[1] & 0xFF) << 16)
+        | ((bytes[2] & 0xFF) << 8)
+        | (bytes[3] & 0xFF);
   }
 
   private void emitState(String channelName, String state, String host, Integer port) {

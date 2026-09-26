@@ -57,6 +57,15 @@ const GUIDES = {
   },
 };
 
+const OFFICIAL_CONNECTION_GUIDES = [
+  '\u76f8\u673a\u7f51\u7edc\u83dc\u5355\u9009\u62e9\u8fde\u63a5\u5230\u667a\u80fd\u8bbe\u5907\uff0c\u518d\u9009 Wi-Fi \u8fde\u63a5\u3002',
+  '\u9065\u63a7\u62cd\u6444\u4f18\u5148\u9009\u5141\u8bb8\u8ba1\u7b97\u673a\u63a7\u5236\u6216\u8fde\u63a5\u5230\u8ba1\u7b97\u673a\u3002',
+  '\u76f8\u673a\u70ed\u70b9\uff1a\u624b\u673a\u8fde NIKON \u70ed\u70b9\uff0cIP 192.168.1.1\uff0c\u7aef\u53e3 15740\u3002',
+  '\u624b\u673a\u70ed\u70b9\uff1a\u76f8\u673a\u52a0\u5165\u624b\u673a\u70ed\u70b9\uff0cApp \u586b\u76f8\u673a\u663e\u793a\u7684 IP\u3002',
+  'USB\uff1a\u76f8\u673a\u8bbe\u4e3a MTP/PTP\uff0c\u7528 OTG \u7ebf\u8fde\u63a5\u5e76\u5141\u8bb8 USB \u6743\u9650\u3002',
+  'SnapBridge \u4f20\u56fe\u4e0e PTP/IP \u9065\u63a7\u4e0d\u662f\u540c\u4e00\u6a21\u5f0f\u3002',
+];
+
 const CONNECTION_CONFIG_KEY = 'nini_connection_configs';
 const CONNECTION_PROFILES_KEY = 'nini_connection_profiles_v2';
 
@@ -166,6 +175,7 @@ export default function MyCameraScreen() {
   const [logs, setLogs] = useState([]);
   const [showLog, setShowLog] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [officialGuideOpen, setOfficialGuideOpen] = useState(false);
   const [currentInfo, setCurrentInfo] = useState(null);
   const [lastConn, setLastConn] = useState(loadLast());
   const [usbDevices, setUsbDevices] = useState([]);
@@ -350,6 +360,21 @@ export default function MyCameraScreen() {
 
   return (
     <div className="page">
+      {officialGuideOpen && (
+        <div className="fixed inset-0 z-[80] bg-black/75 p-4 flex items-center justify-center" onClick={() => setOfficialGuideOpen(false)}>
+          <div className="glass w-full max-w-lg max-h-[82vh] overflow-auto p-5" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold">{'\u5b98\u65b9\u8fde\u63a5\u6d41\u7a0b'}</h2>
+              <button type="button" className="btn btn-secondary h-8 min-h-0 px-3 text-xs" onClick={() => setOfficialGuideOpen(false)}>{'\u5173\u95ed'}</button>
+            </div>
+            <div className="mt-4 space-y-2">
+              {OFFICIAL_CONNECTION_GUIDES.map((line, index) => (
+                <p key={index} className="text-xs leading-6 text-[var(--text-soft)]">{line}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <div className="page-inner space-y-4">
         <div className="flex items-end justify-between gap-4">
           <div>
@@ -510,6 +535,11 @@ export default function MyCameraScreen() {
               {busy ? '连接中' : connected ? '断开连接' : mode === 'usb' ? '连接 USB' : mode === 'demo' ? '启动实验' : '连接相机'}
             </button>
           </div>
+
+          <button className="w-full min-h-11 px-4 border-t border-[var(--line)] flex items-center justify-between text-[11px] text-[var(--text-soft)]" onClick={() => setOfficialGuideOpen(true)}>
+            <span className="flex items-center gap-2"><Info size={14} /> {'\u5b98\u65b9\u8fde\u63a5\u6d41\u7a0b'}</span>
+            <ChevronDown size={15} />
+          </button>
 
           <button className="w-full min-h-11 px-4 border-t border-[var(--line)] flex items-center justify-between text-[11px] text-[var(--text-soft)]" onClick={() => setShowGuide(value => !value)}>
             <span className="flex items-center gap-2"><Info size={14} /> {guide.title}</span>

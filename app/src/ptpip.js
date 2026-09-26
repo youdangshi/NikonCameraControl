@@ -296,6 +296,8 @@ export class PtpIpSession {
     this.closed = false;
     this.opened = false;
     this.intentionalClose = false;
+    this.heartbeatTimer = null;
+    this.heartbeatInFlight = false;
   }
 
   _diag(msg) { this.onDiagnose(msg); try { console.log('[PTP/IP]', msg); } catch {} }
@@ -493,6 +495,7 @@ export class PtpIpSession {
     }
 
     const resp = await this.command(0x1002, [1], 10000); // OpenSession
+    this.startHeartbeat();
     if (resp.responseCode !== 0x2001 && resp.responseCode !== 0x201E) {
       throw new Error(`OpenSession 返回 0x${resp.responseCode.toString(16)}`);
     }
@@ -528,8 +531,32 @@ export class PtpIpSession {
     return waitNikonDeviceReady(this, timeoutMs);
   }
 
+  startHeartbeat(intervalMs = 30000) {
+    if (this.heartbeatTimer || this.closed) return;
+    this.heartbeatTimer = setInterval(async () => {
+      if (this.closed || !this.opened || this.heartbeatInFlight) return;
+      this.heartbeatInFlight = true;
+      try {
+        await this.command(0x1001, [], 4000);
+      } catch (e) {
+        this._diag(`PTP/IP heartbeat failed: ${e.message || e}`);
+      } finally {
+        this.heartbeatInFlight = false;
+      }
+    }, intervalMs);
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.heartbeatInFlight = false;
+  }
+
   async close() {
     if (this.closed) return;
+    this.stopHeartbeat();
     this.intentionalClose = true;
     if (this.sessionId) {
       try { await this.command(0x1003, [], 1500); } catch {}
@@ -555,6 +582,7 @@ export async function openSession(host, port, onDiagnose, onError, onLost, optio
       session._unsubs.push(transport.onState(event => {
         if (session.closed || session.intentionalClose) return;
         if (event?.state === 'disconnected' || event?.state === 'error') {
+          if (typeof session.stopHeartbeat === 'function') session.stopHeartbeat();
           session.closed = true;
           onLost?.('相机连接已断开，请重新连接。');
         }

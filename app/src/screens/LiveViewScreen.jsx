@@ -21,7 +21,7 @@ import {
   fNumberLabel,
 } from '../nikonProperties.js';
 import {
-  ArrowLeft, Aperture, BarChart3, Camera, Grid3X3, Monitor, RotateCcw, SlidersHorizontal, UserRound,
+  ArrowLeft, Aperture, BarChart3, Camera, ChevronDown, ChevronUp, Grid3X3, Monitor, RotateCcw, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 
 const INITIAL_QUICK = {
@@ -35,6 +35,7 @@ const INITIAL_QUICK = {
 const GUIDE_STORAGE = 'nini_composition_guide';
 const MONITOR_STORAGE = 'nini_monitor_mode';
 const HISTOGRAM_STORAGE = 'nini_live_histogram';
+const QUICK_BAR_STORAGE = 'nini_live_quick_bar';
 
 function initialGuide() {
   try {
@@ -60,6 +61,14 @@ function initialHistogramVisible() {
   }
 }
 
+function initialQuickBarVisible() {
+  try {
+    return localStorage.getItem(QUICK_BAR_STORAGE) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 export default function LiveViewScreen() {
   const { state, updatePoseGuides } = useContext(AppContext);
   const navigate = useNavigate();
@@ -70,6 +79,7 @@ export default function LiveViewScreen() {
   const [lvError, setLvError] = useState('');
   const [fps, setFps] = useState(0);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [quickBarVisible, setQuickBarVisible] = useState(initialQuickBarVisible);
   const [posePanelOpen, setPosePanelOpen] = useState(false);
   const [guidePanelOpen, setGuidePanelOpen] = useState(false);
   const [landscape, setLandscape] = useState(true);
@@ -83,6 +93,7 @@ export default function LiveViewScreen() {
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const lvRef = useRef(null);
+  const imageSizeRef = useRef({ width: 0, height: 0 });
   const lvTimerRef = useRef(null);
   const liveImgRef = useRef(null);
   const frameCacheRef = useRef('');
@@ -137,6 +148,11 @@ export default function LiveViewScreen() {
   }, [histogramVisible]);
 
   useEffect(() => {
+    try { localStorage.setItem(QUICK_BAR_STORAGE, String(quickBarVisible)); } catch {}
+    if (!quickBarVisible) setPanelOpen(false);
+  }, [quickBarVisible]);
+
+  useEffect(() => {
     const update = () => {
       const node = lvRef.current;
       if (node) setViewport({ width: node.clientWidth, height: node.clientHeight });
@@ -169,7 +185,8 @@ export default function LiveViewScreen() {
       setLvOn(true);
       lvRunningRef.current = true;
       frameStatsRef.current = { count: 0, startedAt: performance.now() };
-      const targetIntervalMs = 1000 / 30;
+      const targetFps = state.connectionMode === 'usb' ? 30 : state.connectionMode === 'wifi' ? 10 : 12;
+      const targetIntervalMs = 1000 / targetFps;
 
       const loop = async () => {
         if (!lvRunningRef.current || !mountedRef.current) return;
@@ -396,10 +413,15 @@ export default function LiveViewScreen() {
 
   const handleFrameLoad = (event) => {
     const image = event.currentTarget;
-    setImageSize({ width: image.naturalWidth || 1, height: image.naturalHeight || 1 });
+    const nextWidth = image.naturalWidth || 1;
+    const nextHeight = image.naturalHeight || 1;
+    if (imageSizeRef.current.width !== nextWidth || imageSizeRef.current.height !== nextHeight) {
+      imageSizeRef.current = { width: nextWidth, height: nextHeight };
+      setImageSize({ width: nextWidth, height: nextHeight });
+    }
     if (!histogramVisible) return;
     const now = performance.now();
-    if (now - lastHistogramAtRef.current < 250) return;
+    if (now - lastHistogramAtRef.current < 400) return;
     lastHistogramAtRef.current = now;
     try {
       setHistogram(computeHistogramFromImage(image, 160));
@@ -495,9 +517,34 @@ export default function LiveViewScreen() {
       }
     }
   };
+  const imageIsLandscape = imageSize.width > imageSize.height;
+  const imageRotation = imageSize.width && imageSize.height
+    ? (landscape && !imageIsLandscape ? -90 : !landscape && imageIsLandscape ? 90 : 0)
+    : 0;
+  const displayImageSize = imageRotation
+    ? { width: imageSize.height, height: imageSize.width }
+    : imageSize;
+  const liveImageStyle = imageRotation && viewport.width > 0 && viewport.height > 0
+    ? {
+        left: '50%',
+        top: '50%',
+        width: viewport.height,
+        height: viewport.width,
+        objectFit: 'contain',
+        transform: `translate(-50%, -50%) rotate(${imageRotation}deg)`,
+        transformOrigin: 'center center',
+        transition: 'transform .2s ease, width .2s ease, height .2s ease',
+        willChange: 'transform',
+      }
+    : {
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        objectFit: 'contain',
+      };
   let guideRect = null;
-  if (hasFrame && viewport.width > 0 && viewport.height > 0 && imageSize.width > 0 && imageSize.height > 0) {
-    const imageAspect = imageSize.width / imageSize.height;
+  if (hasFrame && viewport.width > 0 && viewport.height > 0 && displayImageSize.width > 0 && displayImageSize.height > 0) {
+    const imageAspect = displayImageSize.width / displayImageSize.height;
     const viewAspect = viewport.width / viewport.height;
     let width;
     let height;
@@ -517,8 +564,8 @@ export default function LiveViewScreen() {
         {hasFrame ? (
           <img
             ref={liveImgRef}
-            className="absolute inset-0 w-full h-full"
-            style={{ objectFit: 'contain' }}
+            className="absolute"
+            style={liveImageStyle}
             onLoad={handleFrameLoad}
             alt="实时取景"
           />
@@ -626,6 +673,7 @@ export default function LiveViewScreen() {
         </div>
       )}
 
+      {quickBarVisible ? (
       <div className="absolute left-3 right-3 bottom-[102px] z-40 h-[56px] rounded-md bg-black/65 backdrop-blur border border-white/10 grid grid-cols-[1fr_1fr_1fr_1fr_auto] items-stretch overflow-hidden">
         {[
           { kind: 'mode', label: '模式', value: quick.expMode },
@@ -661,15 +709,36 @@ export default function LiveViewScreen() {
             </button>
           </div>
         ))}
+        <div className="flex">
+          <button
+            type="button"
+            className="w-11 flex items-center justify-center text-white/60 active:bg-white/10"
+            onClick={() => { setGuidePanelOpen(false); setPosePanelOpen(false); setPanelOpen(value => !value); }}
+            aria-label="展开全部参数"
+          >
+            <SlidersHorizontal size={16} />
+          </button>
+          <button
+            type="button"
+            className="w-10 flex items-center justify-center text-white/60 active:bg-white/10"
+            onClick={() => setQuickBarVisible(false)}
+            aria-label="向下隐藏参数栏"
+            title="向下隐藏参数栏"
+          >
+            <ChevronDown size={17} />
+          </button>
+        </div>
+      </div>
+      ) : (
         <button
           type="button"
-          className="w-12 flex items-center justify-center text-white/60 active:bg-white/10"
-          onClick={() => { setGuidePanelOpen(false); setPosePanelOpen(false); setPanelOpen(value => !value); }}
-          aria-label="展开全部参数"
+          className="absolute left-1/2 -translate-x-1/2 bottom-[102px] z-40 h-8 px-3 rounded-full border border-white/15 bg-black/65 backdrop-blur text-white/65 flex items-center gap-1.5 text-[9px]"
+          onClick={() => setQuickBarVisible(true)}
+          aria-label="显示参数栏"
         >
-          <SlidersHorizontal size={16} />
+          <ChevronUp size={14} /> 参数
         </button>
-      </div>
+      )}
 
       {panelOpen && (
         <div className="absolute left-0 right-0 bottom-[98px] z-40 border-t border-white/10 bg-[#0d1012]/98" style={{ maxHeight: '62vh' }}>

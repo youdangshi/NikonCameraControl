@@ -1,5 +1,9 @@
 package com.nikon.camera.control;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.util.Base64;
 
 import com.getcapacitor.JSObject;
@@ -67,6 +71,8 @@ public class TcpSocketPlugin extends Plugin {
     new Thread(() -> {
       try {
         Socket socket = new Socket();
+        boolean boundToWifi = bindSocketToCameraNetwork(socket);
+        socket.setReuseAddress(true);
         socket.connect(new InetSocketAddress(host, port), 8000);
         socket.setTcpNoDelay(true);
         socket.setKeepAlive(true);
@@ -82,7 +88,10 @@ public class TcpSocketPlugin extends Plugin {
         channel.running = true;
 
         emitState(channelName, "connected", host, port);
-        call.resolve(new JSObject().put("connected", true).put("channel", channelName));
+        call.resolve(new JSObject()
+            .put("connected", true)
+            .put("channel", channelName)
+            .put("boundToWifi", boundToWifi));
         startReader(channel);
       } catch (IOException e) {
         channel.running = false;
@@ -176,6 +185,36 @@ public class TcpSocketPlugin extends Plugin {
   private void closeSocket(Socket socket) {
     if (socket == null) return;
     try { socket.close(); } catch (IOException ignored) {}
+  }
+
+  /**
+   * Android may keep cellular data as the default route while the camera AP has
+   * no Internet access. Binding the PTP/IP sockets to the Wi-Fi Network keeps
+   * command and event traffic on the camera link.
+   */
+  private boolean bindSocketToCameraNetwork(Socket socket) {
+    try {
+      ConnectivityManager manager = (ConnectivityManager) getContext()
+          .getSystemService(Context.CONNECTIVITY_SERVICE);
+      if (manager == null) return false;
+      Network[] networks = manager.getAllNetworks();
+      for (Network network : networks) {
+        NetworkCapabilities capabilities = manager.getNetworkCapabilities(network);
+        if (capabilities == null
+            || !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+          continue;
+        }
+        try {
+          network.bindSocket(socket);
+          return true;
+        } catch (IOException ignored) {
+          // Try the next Wi-Fi network if this device exposes more than one.
+        }
+      }
+    } catch (Exception ignored) {
+      // Binding is an optimisation; the normal route remains a safe fallback.
+    }
+    return false;
   }
 
   private void emitState(String channelName, String state, String host, Integer port) {

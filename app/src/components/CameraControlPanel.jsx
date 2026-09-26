@@ -18,6 +18,8 @@ import {
   exposureProgramLabel,
   exposureTimeMicrosToLabel,
   fNumberLabel,
+  selfTimerLabel,
+  PROPERTY_PROBES,
 } from '../nikonProperties.js';
 import {
   APERTURE_LABELS,
@@ -71,6 +73,21 @@ function formatPropValue(propCode, value) {
   if (code === PTP_PROP.ExposureMeteringMode) return enumKey(METERING_CODES, value) || String(value);
   if (code === PTP_PROP.StillCaptureMode) return enumKey(DRIVE_MODE_CODES, value) || String(value);
   return String(value);
+}
+
+function descriptorValues(desc, fallback = []) {
+  if (!desc || desc.responseCode !== 0x2001) return fallback;
+  if (desc.form === 'enumeration') return Array.isArray(desc.values) ? desc.values : fallback;
+  if (desc.form === 'range' && Number(desc.step) > 0) {
+    const minimum = Number(desc.minimum);
+    const maximum = Number(desc.maximum);
+    const step = Number(desc.step);
+    const count = Math.floor((maximum - minimum) / step) + 1;
+    if (count > 0 && count <= 64) {
+      return Array.from({ length: count }, (_, index) => minimum + index * step);
+    }
+  }
+  return fallback;
 }
 
 function diagnosticResult(item) {
@@ -128,6 +145,11 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
   const [expCompI, setExpCompI] = useState(null);
   const [metering, setMetering] = useState(null);
   const [drive, setDrive] = useState(null);
+  const [selfTimer, setSelfTimer] = useState(null);
+  const [selfTimerShots, setSelfTimerShots] = useState(1);
+  const [selfTimerDesc, setSelfTimerDesc] = useState(null);
+  const [propertyCapabilities, setPropertyCapabilities] = useState([]);
+  const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [propError, setPropError] = useState('');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [propertyDiagnostics, setPropertyDiagnostics] = useState(() => camera.getPropertyDiagnostics?.() || []);
@@ -140,6 +162,7 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
   const apLabel = apertureI == null ? '--' : (apertureOptions[apertureI] || '--');
   const ecValue = expCompI == null ? null : EXP_COMP_VALUES[expCompI];
   const ecLabel = ecValue == null ? '--' : `${ecValue >= 0 ? '+' : ''}${ecValue.toFixed(1)}`;
+  const selfTimerOptions = descriptorValues(selfTimerDesc, [0, 1, 2, 3, 4]);
 
   useEffect(() => {
     if (!onStateChange) return;
@@ -162,8 +185,13 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
       camera.getPropDesc?.(PTP_PROP.ExposureIndex),
       camera.getPropDesc?.(PTP_PROP.ExposureTime),
       camera.getPropDesc?.(PTP_PROP.FNumber),
-    ]).then(([iso, shutter, aperture]) => {
-      if (!catalogCancelled) setCatalog(buildControlCatalog({ iso, shutter, aperture }));
+      camera.getPropDesc?.(PTP_PROP.NikonSelfTimer),
+      camera.getPropDesc?.(PTP_PROP.NikonSelfTimerShootNum),
+    ]).then(([iso, shutter, aperture, timerDesc]) => {
+      if (!catalogCancelled) {
+        setCatalog(buildControlCatalog({ iso, shutter, aperture }));
+        setSelfTimerDesc(timerDesc || null);
+      }
     }).catch(() => {});
     return () => { catalogCancelled = true; };
   }, [state.connectionState]);
@@ -183,10 +211,11 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
     };
 
     const sync = async () => {
-      const [modeRaw, isoRaw, shutterRaw, apertureRaw, wbRaw, focusRaw, evRaw, meteringRaw, driveRaw] = await Promise.all([
+      const [modeRaw, isoRaw, shutterRaw, apertureRaw, wbRaw, focusRaw, evRaw, meteringRaw, driveRaw, selfTimerRaw, selfTimerShotsRaw] = await Promise.all([
         read(PTP_PROP.ExposureProgramMode), read(PTP_PROP.ExposureIndex), read(PTP_PROP.ExposureTime),
         read(PTP_PROP.FNumber), read(PTP_PROP.WhiteBalance), read(PTP_PROP.FocusMode),
         read(PTP_PROP.ExposureBiasCompensation), read(PTP_PROP.ExposureMeteringMode), read(PTP_PROP.StillCaptureMode),
+        read(PTP_PROP.NikonSelfTimer), read(PTP_PROP.NikonSelfTimerShootNum),
       ]);
       if (cancelled) return;
       if (modeRaw != null) setExpMode(exposureProgramLabel(modeRaw));
@@ -209,12 +238,29 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
       }
       if (meteringRaw != null) setMetering(previous => enumKey(METERING_CODES, meteringRaw) || previous);
       if (driveRaw != null) setDrive(previous => enumKey(DRIVE_MODE_CODES, driveRaw) || previous);
+      if (selfTimerRaw != null) setSelfTimer(Number(selfTimerRaw));
+      if (selfTimerShotsRaw != null) setSelfTimerShots(Number(selfTimerShotsRaw));
       console.log('[相机参数]', JSON.stringify({ modeRaw, isoRaw, shutterRaw, apertureRaw, evRaw, wbRaw, focusRaw, meteringRaw, driveRaw }));
       timer = setTimeout(sync, 3000);
     };
     sync();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [state.connectionState, shutterOptions, apertureOptions]);
+
+  const scanProperties = async () => {
+    setCapabilityBusy(true);
+    setPropError('');
+    try {
+      const result = await camera.probeProperties?.(PROPERTY_PROBES.map(item => item.code));
+      const properties = result?.properties || [];
+      setPropertyCapabilities(properties);
+      if (!properties.length) setPropError('\u76f8\u673a\u672a\u8fd4\u56de\u53ef\u8bfb\u53c2\u6570\u63cf\u8ff0\u3002');
+    } catch (e) {
+      setPropError(`\u53c2\u6570\u80fd\u529b\u626b\u63cf\u5931\u8d25\uff1a${e.message || e}`);
+    } finally {
+      setCapabilityBusy(false);
+    }
+  };
 
   const setProp = async (code, value, label) => {
     setPropError('');
@@ -308,6 +354,93 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
           </select>
         </section>
       </div>
+
+      <section className="panel p-3">
+        <div className="flex items-center gap-2">
+          <Timer size={14} className="text-[var(--blue)]" />
+          <span className="text-[11px] font-semibold">{'\u81ea\u62cd\u5b9a\u65f6'}</span>
+          <span className="ml-auto badge badge-blue mono">{selfTimer == null ? '--' : selfTimerLabel(selfTimer)}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <label className="block">
+            <span className="text-[10px] text-[var(--text-muted)]">{'\u5ef6\u65f6'}</span>
+            <select
+              className="select mt-1"
+              value={selfTimer ?? selfTimerOptions[0]}
+              onChange={async event => {
+                const next = Number(event.target.value);
+                if (await setProp(PTP_PROP.NikonSelfTimer, next, '\u81ea\u62cd\u5b9a\u65f6')) setSelfTimer(next);
+              }}
+            >
+              {selfTimerOptions.map(value => <option key={value} value={value}>{selfTimerLabel(value)}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[10px] text-[var(--text-muted)]">{'\u62cd\u6444\u5f20\u6570'}</span>
+            <select
+              className="select mt-1"
+              value={selfTimerShots}
+              onChange={async event => {
+                const next = Number(event.target.value);
+                if (await setProp(PTP_PROP.NikonSelfTimerShootNum, next, '\u81ea\u62cd\u5f20\u6570')) setSelfTimerShots(next);
+              }}
+            >
+              {Array.from({ length: 9 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary w-full mt-2 text-[10px]"
+          onClick={async () => {
+            if (await setProp(PTP_PROP.StillCaptureMode, DRIVE_MODE_CODES.TIMER, '\u9a71\u52a8\u6a21\u5f0f')) setDrive('TIMER');
+          }}
+        >
+          {'\u4f7f\u7528\u81ea\u62cd\u9a71\u52a8\u6a21\u5f0f'}
+        </button>
+        <p className="mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{'\u5ef6\u65f6\u6863\u4f4d\u4ee5\u76f8\u673a\u8fd4\u56de\u7684\u63cf\u8ff0\u4e3a\u51c6\u3002'}</p>
+      </section>
+
+      <section className="panel p-3">
+        <div className="flex items-center gap-2">
+          <Activity size={14} className="text-[var(--green)]" />
+          <span className="text-[11px] font-semibold">{'\u76f8\u673a\u80fd\u529b'}</span>
+          <span className="badge badge-blue">{propertyCapabilities.length}</span>
+          <button
+            type="button"
+            className="btn btn-secondary ml-auto h-7 min-h-0 px-2 text-[9px]"
+            disabled={capabilityBusy}
+            onClick={scanProperties}
+          >
+            {capabilityBusy ? '\u626b\u63cf\u4e2d...' : '\u626b\u63cf\u53c2\u6570'}
+          </button>
+        </div>
+        {propertyCapabilities.length > 0 ? (
+          <div className="mt-2 divide-y divide-[var(--line)] max-h-64 overflow-auto">
+            {propertyCapabilities.map(entry => {
+              const meta = PROPERTY_PROBES.find(item => item.code === entry.code);
+              const desc = entry.descriptor;
+              const supported = desc?.responseCode === 0x2001;
+              const writable = supported && (Number(desc.getSet) & 0x02) !== 0;
+              return (
+                <div key={entry.code} className="py-2 flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold truncate">{meta?.label || `0x${entry.code.toString(16).toUpperCase()}`}</p>
+                    <p className="text-[9px] text-[var(--text-muted)] mono">
+                      {supported ? `${writable ? '\u53ef\u8bfb\u5199' : '\u53ea\u8bfb'} \u00b7 ${desc.form || 'unknown'}` : '\u672a\u652f\u6301'}
+                    </p>
+                  </div>
+                  <span className={`badge ${supported ? (writable ? 'badge-green' : 'badge-blue') : 'badge-red'}`}>
+                    {supported ? (writable ? '\u53ef\u63a7' : '\u8bfb\u53d6') : '--'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{'\u70b9\u51fb\u626b\u63cf\u540e\uff0c\u4f1a\u9010\u9879\u8bfb\u53d6\u76f8\u673a\u58f0\u660e\u7684\u53c2\u6570\u63cf\u8ff0\u3002'}</p>
+        )}
+      </section>
 
       {propError && <div className="panel px-3 py-2.5 text-[10px] leading-4 text-[var(--warning)]">{propError}</div>}
 

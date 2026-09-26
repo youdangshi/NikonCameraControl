@@ -31,6 +31,7 @@ let listeners = {};
 let reconnectTimer = null;
 let mobileSession = null; // 原生直连会话（仅手机 App）
 let mobileSessionMode = null;
+let mobilePropertyDescriptors = new Map();
 let mobileSessionProfile = null;
 let mobileSessionBrand = null;
 let mobileSessionModel = null;
@@ -112,14 +113,14 @@ function scheduleAutoReconnect(reason = '连接已断开') {
     recordDiagnostic('USB 会话已断开。Android 无法安全模拟重新插拔，请拔下数据线后重新连接。', 'warn');
     return;
   }
-  if (autoReconnectAttempts >= 2) {
+  if (autoReconnectAttempts >= 5) {
     recordDiagnostic(`${reason}，自动恢复已达到重试上限。`, 'error');
     emit('status', { state: 'error', error: `${reason}，请检查相机无线设置后重试。` });
     return;
   }
 
   autoReconnectAttempts += 1;
-  const delayMs = autoReconnectAttempts === 1 ? 1200 : 3200;
+  const delayMs = [1000, 2000, 4000, 8000, 12000][Math.max(0, autoReconnectAttempts - 1)];
   recordDiagnostic(`${reason}，${Math.round(delayMs / 1000)} 秒后自动恢复（${autoReconnectAttempts}/2）…`, 'warn');
   emit('status', {
     state: 'reconnecting',
@@ -779,7 +780,7 @@ export const camera = {
       try {
         const resp = await mobileSession.command(OC.GetDevicePropValue, [propCode]);
         const value = resp.responseCode === 0x2001
-          ? decodePropValue(resp.payload, propCode)
+          ? decodePropValue(resp.payload, propCode, mobilePropertyDescriptors.get(Number(propCode)))
           : null;
         emitPropertyDiagnostic({
           operation: 'read',
@@ -815,7 +816,10 @@ export const camera = {
     try {
       const resp = await mobileSession.command(OC.GetDevicePropDesc, [propCode], 8000);
       let descriptor = null;
-      if (resp.responseCode === 0x2001) descriptor = parseDevicePropDesc(resp.payload);
+      if (resp.responseCode === 0x2001) {
+        descriptor = parseDevicePropDesc(resp.payload);
+        mobilePropertyDescriptors.set(Number(propCode), descriptor);
+      }
       emitPropertyDiagnostic({
         operation: 'descriptor',
         opCode: OC.GetDevicePropDesc,
@@ -842,10 +846,18 @@ export const camera = {
   },
 
   /** 设置属性 */
+  async probeProperties(codes = []) {
+    const results = [];
+    for (const code of codes) {
+      results.push({ code, descriptor: await this.getPropDesc(code) });
+    }
+    return { success: true, properties: results };
+  },
+
   async setProp(propCode, value) {
     if (demoCam) return demoCam.setProp(propCode, value);
     if (mobileSession) {
-      const data = encodePropValue(propCode, value);
+      const data = encodePropValue(propCode, value, mobilePropertyDescriptors.get(Number(propCode)));
       const startedAt = nowMs();
       try {
         const resp = await mobileSession.command(OC.SetDevicePropValue, [propCode], 8000, data);

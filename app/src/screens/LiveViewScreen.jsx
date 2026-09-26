@@ -36,6 +36,8 @@ const GUIDE_STORAGE = 'nini_composition_guide';
 const MONITOR_STORAGE = 'nini_monitor_mode';
 const HISTOGRAM_STORAGE = 'nini_live_histogram';
 const QUICK_BAR_STORAGE = 'nini_live_quick_bar';
+const FPS_STORAGE = 'nini_live_fps';
+const FPS_OPTIONS = [5, 10, 15, 30];
 
 function initialGuide() {
   try {
@@ -69,6 +71,15 @@ function initialQuickBarVisible() {
   }
 }
 
+function initialTargetFps() {
+  try {
+    const saved = Number(localStorage.getItem(FPS_STORAGE));
+    return FPS_OPTIONS.includes(saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function LiveViewScreen() {
   const { state, updatePoseGuides } = useContext(AppContext);
   const navigate = useNavigate();
@@ -80,6 +91,7 @@ export default function LiveViewScreen() {
   const [fps, setFps] = useState(0);
   const [panelOpen, setPanelOpen] = useState(false);
   const [quickBarVisible, setQuickBarVisible] = useState(initialQuickBarVisible);
+  const [targetFps, setTargetFps] = useState(initialTargetFps);
   const [posePanelOpen, setPosePanelOpen] = useState(false);
   const [guidePanelOpen, setGuidePanelOpen] = useState(false);
   const [landscape, setLandscape] = useState(true);
@@ -102,6 +114,8 @@ export default function LiveViewScreen() {
   const lvRunningRef = useRef(false);
   const lvStartingRef = useRef(false);
   const frameStatsRef = useRef({ count: 0, startedAt: performance.now() });
+  const targetFpsRef = useRef(targetFps || 10);
+  const frameErrorCountRef = useRef(0);
   const lastFrameAtRef = useRef(0);
   const lastHistogramAtRef = useRef(0);
   const monitorRestartingRef = useRef(false);
@@ -153,6 +167,15 @@ export default function LiveViewScreen() {
   }, [quickBarVisible]);
 
   useEffect(() => {
+    if (targetFps == null) {
+      setTargetFps(state.connectionMode === 'usb' ? 30 : 10);
+      return;
+    }
+    targetFpsRef.current = targetFps;
+    try { localStorage.setItem(FPS_STORAGE, String(targetFps)); } catch {}
+  }, [targetFps, state.connectionMode]);
+
+  useEffect(() => {
     const update = () => {
       const node = lvRef.current;
       if (node) setViewport({ width: node.clientWidth, height: node.clientHeight });
@@ -185,8 +208,8 @@ export default function LiveViewScreen() {
       setLvOn(true);
       lvRunningRef.current = true;
       frameStatsRef.current = { count: 0, startedAt: performance.now() };
-      const targetFps = state.connectionMode === 'usb' ? 30 : state.connectionMode === 'wifi' ? 10 : 12;
-      const targetIntervalMs = 1000 / targetFps;
+      frameErrorCountRef.current = 0;
+      const targetIntervalMs = 1000 / targetFpsRef.current;
 
       const loop = async () => {
         if (!lvRunningRef.current || !mountedRef.current) return;
@@ -195,6 +218,7 @@ export default function LiveViewScreen() {
           const result = await camera.getLiveViewFrame();
           if (!mountedRef.current || !lvRunningRef.current) return;
           if (result?.frame) {
+            frameErrorCountRef.current = 0;
             frameCacheRef.current = result.frame;
             const frameUrl = result.frame.startsWith('data:')
               ? result.frame
@@ -217,8 +241,21 @@ export default function LiveViewScreen() {
         } catch (e) {
           if (mountedRef.current) setLvError(`取景中断：${e.message || e}`);
         }
+        if (result?.code) frameErrorCountRef.current += 1;
+        if (frameErrorCountRef.current >= 10) {
+          lvRunningRef.current = false;
+          await camera.stopLiveView().catch(() => {});
+          if (mountedRef.current) {
+            setLvOn(false);
+            setLvError('\u5b9e\u65f6\u53d6\u666f\u8fde\u7eed\u65e0\u54cd\u5e94\uff0c\u5df2\u505c\u6b62\u8f6e\u8be2\u3002\u8bf7\u91cd\u65b0\u8fdb\u5165\u53d6\u666f\u6216\u91cd\u542f\u76f8\u673a\u53d6\u666f\u3002');
+          }
+          return;
+        }
         if (lvRunningRef.current && mountedRef.current) {
-          const waitMs = Math.max(0, targetIntervalMs - (performance.now() - loopStartedAt));
+          const errorBackoff = frameErrorCountRef.current > 0
+            ? Math.min(2000, 250 * (2 ** Math.min(4, frameErrorCountRef.current)))
+            : 0;
+          const waitMs = Math.max(errorBackoff, targetIntervalMs - (performance.now() - loopStartedAt));
           lvTimerRef.current = setTimeout(loop, waitMs);
         }
       };
@@ -468,6 +505,15 @@ export default function LiveViewScreen() {
     }
   };
 
+  const cycleTargetFps = () => {
+    const index = FPS_OPTIONS.indexOf(targetFps);
+    const next = FPS_OPTIONS[(index + 1) % FPS_OPTIONS.length];
+    targetFpsRef.current = next;
+    setTargetFps(next);
+    frameStatsRef.current = { count: 0, startedAt: performance.now() };
+    setFps(0);
+  };
+
   const adjustQuick = async (kind, direction) => {
     if (staTransferOnly) return;
     if ((kind === 'shutter' || kind === 'aperture') && (quick.expMode === 'P')) return;
@@ -674,7 +720,7 @@ export default function LiveViewScreen() {
       )}
 
       {quickBarVisible ? (
-      <div className="absolute left-3 right-3 bottom-[102px] z-40 h-[56px] rounded-md bg-black/65 backdrop-blur border border-white/10 grid grid-cols-[1fr_1fr_1fr_1fr_auto] items-stretch overflow-hidden">
+      <div className="absolute left-3 right-3 bottom-[102px] z-40 h-[56px] rounded-md bg-black/65 backdrop-blur border border-white/10 grid grid-cols-[1fr_1fr_1fr_1fr_auto_auto] items-stretch overflow-hidden">
         {[
           { kind: 'mode', label: '模式', value: quick.expMode },
           { kind: 'shutter', label: '快门', value: quick.shutter },
@@ -709,6 +755,15 @@ export default function LiveViewScreen() {
             </button>
           </div>
         ))}
+        <button
+          type="button"
+          className="w-12 flex items-center justify-center text-white/70 active:bg-white/10"
+          onClick={cycleTargetFps}
+          aria-label="�л�ʵʱȡ��֡��"
+          title="����л� 5/10/15/30 FPS"
+        >
+          <span className="mono text-[9px] leading-none">{targetFps || '--'} FPS</span>
+        </button>
         <div className="flex">
           <button
             type="button"

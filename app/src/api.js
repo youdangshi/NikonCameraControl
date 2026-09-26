@@ -936,13 +936,27 @@ export const camera = {
       }
       const adapter = getCameraAdapter(mobileSessionBrand);
       const startLiveViewOp = assertAdapterCommand(adapter, 'startLiveView');
-      let resp = null;
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        resp = await mobileSession.command(startLiveViewOp, [], 10000);
-        if (resp.responseCode === 0x2001 || resp.responseCode === 0x201E) break;
-        if (resp.responseCode !== 0x2019) break;
-        await new Promise(resolve => setTimeout(resolve, 220));
+      if (adapter.commands.endLiveView != null) {
+        try {
+          await mobileSession.command(adapter.commands.endLiveView, [], 3000);
+          await new Promise(resolve => setTimeout(resolve, 350));
+        } catch {}
       }
+      let resp = null;
+      let lastError = null;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          resp = await mobileSession.command(startLiveViewOp, [], 10000);
+        } catch (e) {
+          lastError = e;
+          resp = null;
+        }
+        if (resp && (resp.responseCode === 0x2001 || resp.responseCode === 0x201E)) break;
+        if (resp && resp.responseCode !== 0x2019 && resp.responseCode !== 0xA00B) break;
+        await new Promise(resolve => setTimeout(resolve, 400 + attempt * 350));
+      }
+      if (!resp) throw lastError || new Error('����ʵʱȡ��û���յ������Ӧ');
+      if (!resp) throw lastError || new Error('startLiveView: no camera response');
       const success = resp.responseCode === 0x2001 || resp.responseCode === 0x201E;
       emit('liveview', { running: success });
       if (!success) throw new Error(`启动实时取景失败：PTP 0x${Number(resp.responseCode).toString(16)}`);

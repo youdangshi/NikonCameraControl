@@ -162,7 +162,8 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
   const apLabel = apertureI == null ? '--' : (apertureOptions[apertureI] || '--');
   const ecValue = expCompI == null ? null : EXP_COMP_VALUES[expCompI];
   const ecLabel = ecValue == null ? '--' : `${ecValue >= 0 ? '+' : ''}${ecValue.toFixed(1)}`;
-  const selfTimerOptions = descriptorValues(selfTimerDesc, [0, 1, 2, 3, 4]);
+  const selfTimerOptions = descriptorValues(selfTimerDesc, []);
+  const selfTimerSupported = selfTimerDesc?.responseCode === 0x2001 && selfTimerOptions.length > 0;
 
   useEffect(() => {
     if (!onStateChange) return;
@@ -359,46 +360,59 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
         <div className="flex items-center gap-2">
           <Timer size={14} className="text-[var(--blue)]" />
           <span className="text-[11px] font-semibold">{'\u81ea\u62cd\u5b9a\u65f6'}</span>
-          <span className="ml-auto badge badge-blue mono">{selfTimer == null ? '--' : selfTimerLabel(selfTimer)}</span>
+          <span className={`ml-auto badge ${selfTimerSupported ? 'badge-blue' : 'badge-red'} mono`}>
+            {selfTimerSupported ? (selfTimer == null ? '--' : selfTimerLabel(selfTimer)) : '\u672a\u63d0\u4f9b'}
+          </span>
         </div>
         <div className="grid grid-cols-2 gap-2 mt-3">
           <label className="block">
             <span className="text-[10px] text-[var(--text-muted)]">{'\u5ef6\u65f6'}</span>
             <select
               className="select mt-1"
-              value={selfTimer ?? selfTimerOptions[0]}
+              value={selfTimerSupported ? (selfTimer ?? selfTimerOptions[0]) : ''}
+              disabled={!selfTimerSupported}
               onChange={async event => {
                 const next = Number(event.target.value);
                 if (await setProp(PTP_PROP.NikonSelfTimer, next, '\u81ea\u62cd\u5b9a\u65f6')) setSelfTimer(next);
               }}
             >
-              {selfTimerOptions.map(value => <option key={value} value={value}>{selfTimerLabel(value)}</option>)}
+              {selfTimerSupported
+                ? selfTimerOptions.map(value => <option key={value} value={value}>{selfTimerLabel(value)}</option>)
+                : <option value="">{'\u76f8\u673a\u672a\u63d0\u4f9b'}</option>}
             </select>
           </label>
           <label className="block">
             <span className="text-[10px] text-[var(--text-muted)]">{'\u62cd\u6444\u5f20\u6570'}</span>
             <select
               className="select mt-1"
-              value={selfTimerShots}
+              value={selfTimerSupported ? selfTimerShots : ''}
+              disabled={!selfTimerSupported}
               onChange={async event => {
                 const next = Number(event.target.value);
                 if (await setProp(PTP_PROP.NikonSelfTimerShootNum, next, '\u81ea\u62cd\u5f20\u6570')) setSelfTimerShots(next);
               }}
             >
-              {Array.from({ length: 9 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}
+              {selfTimerSupported
+                ? Array.from({ length: 9 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)
+                : <option value="">{'\u672a\u63d0\u4f9b'}</option>}
             </select>
           </label>
         </div>
         <button
           type="button"
           className="btn btn-secondary w-full mt-2 text-[10px]"
+          disabled={!selfTimerSupported}
           onClick={async () => {
             if (await setProp(PTP_PROP.StillCaptureMode, DRIVE_MODE_CODES.TIMER, '\u9a71\u52a8\u6a21\u5f0f')) setDrive('TIMER');
           }}
         >
           {'\u4f7f\u7528\u81ea\u62cd\u9a71\u52a8\u6a21\u5f0f'}
         </button>
-        <p className="mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{'\u5ef6\u65f6\u6863\u4f4d\u4ee5\u76f8\u673a\u8fd4\u56de\u7684\u63cf\u8ff0\u4e3a\u51c6\u3002'}</p>
+        <p className="mt-2 text-[9px] leading-4 text-[var(--text-muted)]">
+          {selfTimerSupported
+            ? '\u5ef6\u65f6\u6863\u4f4d\u4ee5\u76f8\u673a\u8fd4\u56de\u7684\u63cf\u8ff0\u4e3a\u51c6\u3002'
+            : 'Z30 \u5f53\u524d\u672a\u901a\u8fc7 0xD063/0xD0F5 \u63d0\u4f9b\u81ea\u62cd\u63cf\u8ff0\uff0c\u8bf7\u4f7f\u7528\u9a71\u52a8\u6a21\u5f0f\u4e2d\u7684\u81ea\u62cd\u5b9a\u65f6\u3002'}
+        </p>
       </section>
 
       <section className="panel p-3">
@@ -429,6 +443,12 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
                     <p className="text-[9px] text-[var(--text-muted)] mono">
                       {supported ? `${writable ? '\u53ef\u8bfb\u5199' : '\u53ea\u8bfb'} \u00b7 ${desc.form || 'unknown'}` : '\u672a\u652f\u6301'}
                     </p>
+                    {supported && (
+                      <p className="text-[9px] text-[var(--text-muted)] mono truncate">
+                        {'current=' + String(desc.currentValue)}
+                        {Array.isArray(desc.values) ? ' values=' + desc.values.slice(0, 12).join(',') : ''}
+                      </p>
+                    )}
                   </div>
                   <span className={`badge ${supported ? (writable ? 'badge-green' : 'badge-blue') : 'badge-red'}`}>
                     {supported ? (writable ? '\u53ef\u63a7' : '\u8bfb\u53d6') : '--'}

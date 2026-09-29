@@ -107,6 +107,13 @@ function initialLiveQuality() {
   }
 }
 
+function liveViewSizeLabel(value) {
+  const code = Number(value);
+  if (code === 1) return 'QVGA';
+  if (code === 2) return 'VGA';
+  return `画质 ${code}`;
+}
+
 function drawFocusPeaking(image, canvas, threshold) {
   if (!image?.naturalWidth || !canvas) return;
   const sampleCanvas = canvas.__focusSampleCanvas || (canvas.__focusSampleCanvas = document.createElement('canvas'));
@@ -183,6 +190,8 @@ export default function LiveViewScreen() {
   const [focusPoint, setFocusPoint] = useState({ x: 0.5, y: 0.5 });
   const [liveQuality, setLiveQuality] = useState(initialLiveQuality);
   const [activeQuality, setActiveQuality] = useState(initialLiveQuality);
+  const [liveSize, setLiveSize] = useState(null);
+  const [liveSizeOptions, setLiveSizeOptions] = useState([]);
   const [afState, setAfState] = useState('idle');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -248,6 +257,21 @@ export default function LiveViewScreen() {
     liveQualityRef.current = liveQuality;
     try { localStorage.setItem(LIVE_QUALITY_STORAGE, liveQuality); } catch {}
   }, [liveQuality]);
+
+  useEffect(() => {
+    if (!connected) return undefined;
+    let cancelled = false;
+    Promise.all([
+      camera.getPropDesc?.(PTP_PROP.NikonLiveViewImageSize),
+      camera.getProp?.(PTP_PROP.NikonLiveViewImageSize),
+    ]).then(([desc, current]) => {
+      if (cancelled) return;
+      const values = desc?.responseCode === 0x2001 && desc.form === 'enumeration' ? desc.values : [];
+      setLiveSizeOptions(Array.isArray(values) ? values.map(Number) : []);
+      if (current?.code === 0x2001) setLiveSize(Number(current.value));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [connected]);
 
   useEffect(() => {
     try { localStorage.setItem(MONITOR_STORAGE, String(monitorMode)); } catch {}
@@ -783,6 +807,20 @@ export default function LiveViewScreen() {
     height: 38,
   } : null;
 
+  const applyLiveSize = async value => {
+    const result = await camera.setProp(PTP_PROP.NikonLiveViewImageSize, Number(value));
+    if (!result?.success) {
+      setLvError(`取景画质写入失败：PTP 0x${Number(result?.code || 0).toString(16)}`);
+      return;
+    }
+    setLiveSize(Number(value));
+    if (lvRunningRef.current) {
+      await stopLV(false);
+      await new Promise(resolve => setTimeout(resolve, 520));
+      startLV();
+    }
+  };
+
   return (
     <div className="h-full w-full relative overflow-hidden bg-black text-white">
       <div ref={lvRef} className="absolute inset-0 cursor-crosshair" onClick={handleTap}>
@@ -1070,6 +1108,17 @@ export default function LiveViewScreen() {
           <div className="grid grid-cols-2 gap-1.5">
             <button className={`grid-chip ${liveQuality === 'standard' ? 'active' : ''}`} onClick={() => setLiveQuality('standard')}>标准</button>
             <button className={`grid-chip ${liveQuality === 'extended' ? 'active' : ''}`} onClick={() => setLiveQuality('extended')}>扩展高清</button>
+          </div>
+          <div className="flex items-center justify-between text-[9px] text-white/45 mt-3 mb-1">
+            <span>相机预览尺寸</span>
+            <span className="mono">{liveSize == null ? '--' : liveViewSizeLabel(liveSize)}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {liveSizeOptions.length > 0
+              ? liveSizeOptions.map(value => (
+                <button key={value} className={`grid-chip ${Number(liveSize) === Number(value) ? 'active' : ''}`} onClick={() => applyLiveSize(value)}>{liveViewSizeLabel(value)}</button>
+              ))
+              : <span className="text-[9px] text-white/40 col-span-2">相机未提供可调尺寸</span>}
           </div>
         </div>
       )}

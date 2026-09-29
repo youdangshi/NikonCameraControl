@@ -27,6 +27,7 @@ export const PTP_PROP = Object.freeze({
   Copyright: 0x501F,
   NikonRecordingMedia: 0xD10B,
   NikonLiveViewSelector: 0xD1A6,
+  NikonLiveViewImageSize: 0xD1AC,
   NikonApplicationMode: 0xD1F0,
   NikonSelfTimer: 0xD063,
   NikonSelfTimerShootNum: 0xD0F5,
@@ -44,6 +45,7 @@ export const PTP_PROP_NAMES = Object.freeze({
   [PTP_PROP.StillCaptureMode]: '驱动模式',
   [PTP_PROP.NikonRecordingMedia]: '记录介质',
   [PTP_PROP.NikonLiveViewSelector]: '实时取景选择器',
+  [PTP_PROP.NikonLiveViewImageSize]: '实时取景画质',
   [PTP_PROP.NikonApplicationMode]: '应用模式',
 });
 
@@ -191,6 +193,7 @@ const UINT16_PROPS = new Set([
   PTP_PROP.BurstNumber,
   PTP_PROP.NikonSelfTimer,
   PTP_PROP.NikonSelfTimerShootNum,
+  PTP_PROP.NikonLiveViewImageSize,
 ]);
 
 const UINT8_PROPS = new Set([

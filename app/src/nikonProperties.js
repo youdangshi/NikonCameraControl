@@ -160,6 +160,12 @@ export const FOCUS_MODE_CODES = Object.freeze({
   'AF-A': 32786,
 });
 
+export function focusModeLabel(value) {
+  const code = Number(value);
+  const entry = Object.entries(FOCUS_MODE_CODES).find(([, itemCode]) => itemCode === code);
+  return entry ? entry[0] : '--';
+}
+
 export const DRIVE_MODE_CODES = Object.freeze({
   S: 1,
   CH: 2,

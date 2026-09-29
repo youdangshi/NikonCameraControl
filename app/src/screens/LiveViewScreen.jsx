@@ -19,9 +19,10 @@ import {
   exposureProgramLabel,
   exposureTimeMicrosToLabel,
   fNumberLabel,
+  focusModeLabel,
 } from '../nikonProperties.js';
 import {
-  ArrowLeft, Aperture, BarChart3, Camera, ChevronDown, ChevronUp, Grid3X3, Monitor, RotateCcw, SlidersHorizontal, UserRound,
+  ArrowLeft, Aperture, BarChart3, Camera, ChevronDown, ChevronUp, Grid3X3, Monitor, RotateCcw, ScanLine, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 
 const INITIAL_QUICK = {
@@ -37,6 +38,7 @@ const MONITOR_STORAGE = 'nini_monitor_mode';
 const HISTOGRAM_STORAGE = 'nini_live_histogram';
 const QUICK_BAR_STORAGE = 'nini_live_quick_bar';
 const FPS_STORAGE = 'nini_live_fps';
+const FOCUS_PEAKING_STORAGE = 'nini_focus_peaking';
 const FPS_OPTIONS = [5, 10, 15, 30];
 const APP_TIMER_DELAY_KEY = 'nini_app_self_timer_delay';
 const APP_TIMER_SHOTS_KEY = 'nini_app_self_timer_shots';
@@ -82,6 +84,66 @@ function initialTargetFps() {
   }
 }
 
+function initialFocusPeaking() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FOCUS_PEAKING_STORAGE) || 'null');
+    const threshold = Number(saved?.threshold);
+    return {
+      enabled: Boolean(saved?.enabled),
+      threshold: Number.isFinite(threshold) ? Math.max(18, Math.min(60, threshold)) : 30,
+    };
+  } catch {
+    return { enabled: false, threshold: 30 };
+  }
+}
+
+function drawFocusPeaking(image, canvas, threshold) {
+  if (!image?.naturalWidth || !canvas) return;
+  const sampleCanvas = canvas.__focusSampleCanvas || (canvas.__focusSampleCanvas = document.createElement('canvas'));
+  const width = Math.min(480, image.naturalWidth);
+  const height = Math.max(1, Math.round(width * image.naturalHeight / image.naturalWidth));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  if (sampleCanvas.width !== width || sampleCanvas.height !== height) {
+    sampleCanvas.width = width;
+    sampleCanvas.height = height;
+  }
+
+  const sampleContext = sampleCanvas.getContext('2d', { willReadFrequently: true });
+  const outputContext = canvas.getContext('2d');
+  if (!sampleContext || !outputContext) return;
+  sampleContext.clearRect(0, 0, width, height);
+  sampleContext.drawImage(image, 0, 0, width, height);
+  const source = sampleContext.getImageData(0, 0, width, height);
+  const pixels = source.data;
+  const luminance = new Uint8ClampedArray(width * height);
+  for (let index = 0, offset = 0; index < luminance.length; index += 1, offset += 4) {
+    luminance[index] = (pixels[offset] * 54 + pixels[offset + 1] * 183 + pixels[offset + 2] * 19) >> 8;
+  }
+
+  const output = outputContext.createImageData(width, height);
+  const rgba = output.data;
+  const cutoff = Math.max(8, Number(threshold) || 30);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const horizontal = Math.abs(luminance[index + 1] - luminance[index - 1]);
+      const vertical = Math.abs(luminance[index + width] - luminance[index - width]);
+      const edge = Math.max(horizontal, vertical);
+      if (edge < cutoff) continue;
+      const offset = index * 4;
+      rgba[offset] = 255;
+      rgba[offset + 1] = 212;
+      rgba[offset + 2] = 0;
+      rgba[offset + 3] = Math.min(235, 105 + edge * 2);
+    }
+  }
+  outputContext.clearRect(0, 0, width, height);
+  outputContext.putImageData(output, 0, 0);
+}
+
 export default function LiveViewScreen() {
   const { state, updatePoseGuides } = useContext(AppContext);
   const navigate = useNavigate();
@@ -105,12 +167,17 @@ export default function LiveViewScreen() {
   const [quickCatalog, setQuickCatalog] = useState(() => buildControlCatalog());
   const [quickError, setQuickError] = useState('');
   const [guide, setGuide] = useState(initialGuide);
+  const [focusPeaking, setFocusPeaking] = useState(initialFocusPeaking);
+  const [focusPanelOpen, setFocusPanelOpen] = useState(false);
+  const [focusInfo, setFocusInfo] = useState({ mode: '--', focalLength: null });
+  const [afState, setAfState] = useState('idle');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const lvRef = useRef(null);
   const imageSizeRef = useRef({ width: 0, height: 0 });
   const lvTimerRef = useRef(null);
   const liveImgRef = useRef(null);
+  const focusCanvasRef = useRef(null);
   const frameCacheRef = useRef('');
   const hasFrameRef = useRef(false);
   const restartTimerRef = useRef(null);
@@ -121,6 +188,8 @@ export default function LiveViewScreen() {
   const frameErrorCountRef = useRef(0);
   const lastFrameAtRef = useRef(0);
   const lastHistogramAtRef = useRef(0);
+  const lastFocusAnalysisAtRef = useRef(0);
+  const afStateTimerRef = useRef(null);
   const monitorRestartingRef = useRef(false);
   const mountedRef = useRef(true);
   const connected = state.connectionState === 'session_open';
@@ -150,6 +219,16 @@ export default function LiveViewScreen() {
   useEffect(() => {
     try { localStorage.setItem(GUIDE_STORAGE, JSON.stringify(guide)); } catch {}
   }, [guide]);
+
+  useEffect(() => {
+    try { localStorage.setItem(FOCUS_PEAKING_STORAGE, JSON.stringify(focusPeaking)); } catch {}
+    const canvas = focusCanvasRef.current;
+    if (!focusPeaking.enabled && canvas) {
+      canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+    } else if (focusPeaking.enabled && liveImgRef.current) {
+      drawFocusPeaking(liveImgRef.current, canvas, focusPeaking.threshold);
+    }
+  }, [focusPeaking]);
 
   useEffect(() => {
     try { localStorage.setItem(MONITOR_STORAGE, String(monitorMode)); } catch {}
@@ -361,11 +440,13 @@ export default function LiveViewScreen() {
     };
 
     const sync = async () => {
-      const [modeRaw, isoRaw, shutterRaw, apertureRaw] = await Promise.all([
+      const [modeRaw, isoRaw, shutterRaw, apertureRaw, focusRaw, focalLengthRaw] = await Promise.all([
         read(PTP_PROP.ExposureProgramMode),
         read(PTP_PROP.ExposureIndex),
         read(PTP_PROP.ExposureTime),
         read(PTP_PROP.FNumber),
+        read(PTP_PROP.FocusMode),
+        read(PTP_PROP.FocalLength),
       ]);
       if (cancelled) return;
       setQuick(previous => ({
@@ -374,6 +455,10 @@ export default function LiveViewScreen() {
         iso: isoRaw == null ? previous.iso : Number(isoRaw),
         shutter: shutterRaw == null ? previous.shutter : exposureTimeMicrosToLabel(shutterRaw),
         aperture: apertureRaw == null ? previous.aperture : fNumberLabel(apertureRaw),
+      }));
+      setFocusInfo(previous => ({
+        mode: focusRaw == null ? previous.mode : focusModeLabel(focusRaw),
+        focalLength: focalLengthRaw == null ? previous.focalLength : Number(focalLengthRaw),
       }));
       timer = setTimeout(sync, 3000);
     };
@@ -441,27 +526,35 @@ export default function LiveViewScreen() {
   };
 
   const doAF = async () => {
-    if (!connected) return;
-    if (staTransferOnly) return;
+    if (!connected) return false;
+    if (staTransferOnly) return false;
+    if (afStateTimerRef.current) clearTimeout(afStateTimerRef.current);
+    setAfState('focusing');
     try {
       await camera.autoFocus();
       setLvError('');
+      setAfState('locked');
+      afStateTimerRef.current = setTimeout(() => mountedRef.current && setAfState('idle'), 1600);
+      return true;
     } catch (e) {
+      setAfState('failed');
       setLvError(`自动对焦失败：${e.message || e}`);
+      return false;
     }
   };
 
   const handleTap = async (event) => {
-    if (event.target.closest('button') || panelOpen || posePanelOpen || guidePanelOpen) return;
+    if (event.target.closest('button') || panelOpen || posePanelOpen || guidePanelOpen || focusPanelOpen) return;
     if (staTransferOnly) return;
     const host = lvRef.current;
     if (!host) return;
     const rect = host.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    await doAF();
+    const focusOk = await doAF();
     const dot = document.createElement('div');
-    dot.className = 'absolute w-7 h-7 border border-[var(--accent)] rounded-full pointer-events-none z-30';
+    dot.className = 'absolute w-7 h-7 rounded-full pointer-events-none z-30';
+    dot.style.border = `2px solid ${focusOk ? 'var(--green)' : 'var(--red)'}`;
     dot.style.cssText = `left:${x}px;top:${y}px;transform:translate(-50%,-50%);animation:pulse 1s ease-out forwards`;
     host.appendChild(dot);
     setTimeout(() => dot.remove(), 1000);
@@ -475,8 +568,12 @@ export default function LiveViewScreen() {
       imageSizeRef.current = { width: nextWidth, height: nextHeight };
       setImageSize({ width: nextWidth, height: nextHeight });
     }
-    if (!histogramVisible) return;
     const now = performance.now();
+    if (focusPeaking.enabled && now - lastFocusAnalysisAtRef.current >= 80) {
+      lastFocusAnalysisAtRef.current = now;
+      drawFocusPeaking(image, focusCanvasRef.current, focusPeaking.threshold);
+    }
+    if (!histogramVisible) return;
     if (now - lastHistogramAtRef.current < 400) return;
     lastHistogramAtRef.current = now;
     try {
@@ -490,6 +587,10 @@ export default function LiveViewScreen() {
   };
 
   const guideLabel = COMPOSITION_MODES.find(item => item.id === guide.mode)?.label || '构图线';
+  const focalLengthLabel = Number.isFinite(focusInfo.focalLength) && focusInfo.focalLength > 0
+    ? `${Math.round(focusInfo.focalLength)} mm`
+    : '--';
+  const afLabel = afState === 'focusing' ? '对焦中' : afState === 'locked' ? 'AF 锁定' : afState === 'failed' ? 'AF 失败' : '';
   const toggleOrientation = async () => {
     const next = !landscape;
     setLandscape(next);
@@ -643,13 +744,20 @@ export default function LiveViewScreen() {
     <div className="h-full w-full relative overflow-hidden bg-black text-white">
       <div ref={lvRef} className="absolute inset-0 cursor-crosshair" onClick={handleTap}>
         {hasFrame ? (
-          <img
-            ref={liveImgRef}
-            className="absolute"
-            style={liveImageStyle}
-            onLoad={handleFrameLoad}
-            alt="实时取景"
-          />
+          <>
+            <img
+              ref={liveImgRef}
+              className="absolute"
+              style={liveImageStyle}
+              onLoad={handleFrameLoad}
+              alt="实时取景"
+            />
+            <canvas
+              ref={focusCanvasRef}
+              className="absolute pointer-events-none"
+              style={{ ...liveImageStyle, opacity: focusPeaking.enabled ? 0.92 : 0 }}
+            />
+          </>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-black">
             {!connected ? (
@@ -695,6 +803,17 @@ export default function LiveViewScreen() {
             </div>
           </div>
         </div>
+
+        {hasFrame && (
+          <div className="absolute left-3 top-[68px] z-30 pointer-events-none flex items-center gap-1.5 text-[9px]">
+            <span className="rounded-full border border-white/12 bg-black/45 px-2 py-1 text-white/70">{focusInfo.mode || '--'}</span>
+            <span className="rounded-full border border-white/12 bg-black/45 px-2 py-1 text-white/70">{focalLengthLabel}</span>
+            <span className={`rounded-full border px-2 py-1 flex items-center gap-1 ${focusPeaking.enabled ? 'border-[var(--accent)]/60 bg-black/55 text-[var(--accent)]' : 'border-white/12 bg-black/45 text-white/55'}`}>
+              <ScanLine size={10} /> 峰值
+            </span>
+            {afLabel && <span className={`rounded-full border px-2 py-1 bg-black/55 ${afState === 'failed' ? 'border-[var(--red)]/60 text-[var(--red)]' : afState === 'locked' ? 'border-[var(--green)]/60 text-[var(--green)]' : 'border-white/20 text-white/75'}`}>{afLabel}</span>}
+          </div>
+        )}
 
         {lvError && hasFrame && (
           <div className="absolute left-3 right-3 top-[84px] z-30 rounded-md bg-[var(--red)]/90 px-3 py-2 text-[11px] text-white shadow-lg">
@@ -872,6 +991,30 @@ export default function LiveViewScreen() {
         </div>
       )}
 
+      {focusPanelOpen && (
+        <div className="absolute left-3 right-3 bottom-[102px] z-50 rounded-md border border-white/15 bg-[#111417]/98 p-3 shadow-2xl">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold flex items-center gap-1.5"><ScanLine size={13} /> 峰值对焦</span>
+            <button className={`grid-chip ${focusPeaking.enabled ? 'active' : ''}`} onClick={() => setFocusPeaking(value => ({ ...value, enabled: !value.enabled }))}>
+              {focusPeaking.enabled ? '已开启' : '已关闭'}
+            </button>
+          </div>
+          <div className="flex items-center justify-between text-[9px] text-white/45 mb-1">
+            <span>边缘灵敏度</span>
+            <span className="mono">{focusPeaking.threshold <= 24 ? '高' : focusPeaking.threshold <= 38 ? '中' : '低'}</span>
+          </div>
+          <input
+            type="range"
+            min="18"
+            max="60"
+            step="2"
+            value={focusPeaking.threshold}
+            onChange={event => setFocusPeaking(value => ({ ...value, threshold: Number(event.target.value) }))}
+            className="w-full accent-[var(--accent)]"
+          />
+        </div>
+      )}
+
       <div className="absolute left-0 right-0 bottom-0 z-50 h-[96px] px-3 pt-2 pb-3 bg-gradient-to-t from-black via-black/90 to-transparent">
         <div className="relative h-full flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -885,14 +1028,14 @@ export default function LiveViewScreen() {
             </button>
             <button
               className={`w-11 h-11 rounded-full border flex items-center justify-center ${guidePanelOpen ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]' : 'bg-white/8 border-white/12 text-white/75'}`}
-              onClick={() => { setPanelOpen(false); setPosePanelOpen(false); setGuidePanelOpen(value => !value); }}
+              onClick={() => { setPanelOpen(false); setPosePanelOpen(false); setFocusPanelOpen(false); setGuidePanelOpen(value => !value); }}
               aria-label="构图辅助"
             >
               <Grid3X3 size={18} />
             </button>
             <button
               className={`w-11 h-11 rounded-full border flex items-center justify-center ${state.poseGuides.enabled ? 'bg-white/18 border-white/25 text-white' : 'bg-white/8 border-white/12 text-white/70'}`}
-              onClick={() => { setPanelOpen(false); setGuidePanelOpen(false); setPosePanelOpen(value => !value); }}
+              onClick={() => { setPanelOpen(false); setGuidePanelOpen(false); setFocusPanelOpen(false); setPosePanelOpen(value => !value); }}
               aria-label="人像姿势"
             >
               <UserRound size={18} />
@@ -904,6 +1047,14 @@ export default function LiveViewScreen() {
               title={histogramVisible ? '关闭实时直方图' : '开启实时直方图'}
             >
               <BarChart3 size={18} />
+            </button>
+            <button
+              className={`w-11 h-11 rounded-full border flex items-center justify-center ${focusPeaking.enabled ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]' : 'bg-white/8 border-white/12 text-white/75'}`}
+              onClick={() => { setPanelOpen(false); setGuidePanelOpen(false); setPosePanelOpen(false); setFocusPanelOpen(value => !value); }}
+              aria-label="辅助对焦"
+              title="峰值对焦"
+            >
+              <ScanLine size={18} />
             </button>
           </div>
 
@@ -920,7 +1071,7 @@ export default function LiveViewScreen() {
           <div className="flex items-center gap-2">
             <button
               className={`w-11 h-11 rounded-full border flex items-center justify-center ${panelOpen ? 'bg-[var(--accent)] text-[var(--accent-ink)] border-[var(--accent)]' : 'bg-white/8 border-white/12 text-white/75'}`}
-              onClick={() => { setGuidePanelOpen(false); setPosePanelOpen(false); setPanelOpen(value => !value); }}
+              onClick={() => { setGuidePanelOpen(false); setPosePanelOpen(false); setFocusPanelOpen(false); setPanelOpen(value => !value); }}
               aria-label="相机参数"
             >
               <SlidersHorizontal size={18} />

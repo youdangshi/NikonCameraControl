@@ -1191,5 +1191,5 @@ export const camera = {
   on,
 };
 
-// 自动初始化
-connectWS();
+// WebSocket 只用于桌面/浏览器后端。Android 原生直连相机，不能连接网页端服务。
+if (!isNativeMobile()) connectWS();

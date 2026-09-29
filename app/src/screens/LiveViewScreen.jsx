@@ -217,8 +217,10 @@ export default function LiveViewScreen() {
       const loop = async () => {
         if (!lvRunningRef.current || !mountedRef.current) return;
         const loopStartedAt = performance.now();
+        let result = null;
+        let failed = false;
         try {
-          const result = await camera.getLiveViewFrame();
+          result = await camera.getLiveViewFrame();
           if (!mountedRef.current || !lvRunningRef.current) return;
           if (result?.frame) {
             frameErrorCountRef.current = 0;
@@ -242,9 +244,10 @@ export default function LiveViewScreen() {
           }
           if (result?.code) setLvError(`取景帧读取失败：PTP 0x${Number(result.code).toString(16)}`);
         } catch (e) {
+          failed = true;
           if (mountedRef.current) setLvError(`取景中断：${e.message || e}`);
         }
-        if (result?.code) frameErrorCountRef.current += 1;
+        if (result?.code || failed) frameErrorCountRef.current += 1;
         if (frameErrorCountRef.current >= 10) {
           lvRunningRef.current = false;
           await camera.stopLiveView().catch(() => {});

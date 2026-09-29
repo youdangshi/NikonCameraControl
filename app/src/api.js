@@ -987,17 +987,26 @@ export const camera = {
   },
 
   /** 获取 Nikon 实时取景 JPEG 帧 */
-  async getLiveViewFrame() {
+  async getLiveViewFrame(options = {}) {
     if (demoCam) return demoCam.getLiveViewFrame();
     if (mobileSession) {
       assertCameraCapability('liveView', '实时取景');
       const adapter = getCameraAdapter(mobileSessionBrand);
-      const frameOp = assertAdapterCommand(adapter, 'getLiveViewImage');
+      const preferredOp = options.quality === 'standard'
+        ? assertAdapterCommand(adapter, 'getLiveViewImage')
+        : (adapter.commands.getLiveViewImageEx ?? assertAdapterCommand(adapter, 'getLiveViewImage'));
+      const fallbackOp = assertAdapterCommand(adapter, 'getLiveViewImage');
+      const operations = preferredOp === fallbackOp ? [preferredOp] : [preferredOp, fallbackOp];
       let resp = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        resp = await mobileSession.command(frameOp, [], 12000);
-        if (resp.responseCode === 0x2001 || resp.responseCode !== 0x2019) break;
-        await new Promise(resolve => setTimeout(resolve, 80));
+      let usedOp = preferredOp;
+      for (const frameOp of operations) {
+        usedOp = frameOp;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          resp = await mobileSession.command(frameOp, [], 12000);
+          if (resp.responseCode === 0x2001 || resp.responseCode !== 0x2019) break;
+          await new Promise(resolve => setTimeout(resolve, 80));
+        }
+        if (resp.responseCode === 0x2001) break;
       }
       if (resp.responseCode === 0xA00B && Date.now() - lastLiveViewRecoveryAt > 3000) {
         lastLiveViewRecoveryAt = Date.now();
@@ -1005,15 +1014,33 @@ export const camera = {
           await this.stopLiveView();
           await new Promise(resolve => setTimeout(resolve, 420));
           await this.startLiveView();
-          resp = await mobileSession.command(frameOp, [], 12000);
+          resp = await mobileSession.command(usedOp, [], 12000);
         } catch {}
       }
       if (resp.responseCode !== 0x2001) return { frame: null, code: resp.responseCode, direct: true };
       const jpeg = extractJpeg(resp.payload);
       if (!jpeg) return { frame: null, direct: true };
-      return { frame: bytesToDataUrl(jpeg, 'image/jpeg'), direct: true };
+      return { frame: bytesToDataUrl(jpeg, 'image/jpeg'), direct: true, quality: usedOp === adapter.commands.getLiveViewImageEx ? 'extended' : 'standard' };
     }
     return fetchJSON('GET', '/api/liveview/frame');
+  },
+
+  /** 移动 Nikon 实时取景对焦区域，坐标采用当前 JPEG 帧的像素坐标。 */
+  async setAfArea(x, y) {
+    if (demoCam) return { success: true, demo: true };
+    if (mobileSession) {
+      assertCameraCapability('autofocus', '自动对焦');
+      const adapter = getCameraAdapter(mobileSessionBrand);
+      if (adapter.commands.changeAfArea == null) throw new Error('当前相机不支持移动对焦区域');
+      const resp = await mobileSession.command(
+        adapter.commands.changeAfArea,
+        [Math.max(0, Math.round(Number(x) || 0)), Math.max(0, Math.round(Number(y) || 0))],
+        5000,
+      );
+      if (resp.responseCode !== 0x2001) throw new Error(`移动对焦区域失败：PTP 0x${resp.responseCode.toString(16)}`);
+      return { success: true };
+    }
+    return { success: false, web: true };
   },
 
   /** 自动对焦 */
@@ -1053,7 +1080,9 @@ export const camera = {
       const swapBytes = value => (((value & 0xff) << 24) | ((value & 0xff00) << 8) | ((value >>> 8) & 0xff00) | ((value >>> 24) & 0xff)) >>> 0;
       const storageIds = Array.from(new Set([
         ...declaredIds,
+        ...declaredIds.map(value => (value + 1) >>> 0),
         ...declaredIds.map(swapBytes),
+        ...declaredIds.map(value => (swapBytes(value) + 1) >>> 0),
         0xFFFFFFFF,
       ])).filter((id, index, values) => id && values.indexOf(id) === index);
       if (!storageIds.length) return [];

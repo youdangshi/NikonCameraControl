@@ -9,6 +9,8 @@ function assert(condition, message) {
 }
 
 assert(getCameraAdapter('nikon').commands.startLiveView === 0x9201, 'Nikon live view opcode mismatch');
+assert(getCameraAdapter('nikon').commands.getLiveViewImageEx === 0x9428, 'Nikon extended live view opcode mismatch');
+assert(getCameraAdapter('nikon').commands.changeAfArea === 0x9205, 'Nikon AF area opcode mismatch');
 assert(getCameraAdapter('canon').commands.getViewFinderData === 0x9153, 'Canon viewfinder opcode mismatch');
 assert(getCameraAdapter('sony').vendorCommandsEnabled === false, 'Sony vendor commands must stay disabled');
 assert(getCameraAdapter('fujifilm').vendorCommandsEnabled === false, 'Fujifilm vendor commands must stay disabled');

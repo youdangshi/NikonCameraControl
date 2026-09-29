@@ -20,6 +20,8 @@ const NIKON_COMMANDS = Object.freeze({
   startLiveView: 0x9201,
   endLiveView: 0x9202,
   getLiveViewImage: 0x9203,
+  getLiveViewImageEx: 0x9428,
+  changeAfArea: 0x9205,
   afDrive: 0x90C1,
   deviceReady: 0x90C8,
   changeApplicationMode: 0x9435,

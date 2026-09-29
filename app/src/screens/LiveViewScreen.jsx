@@ -40,6 +40,7 @@ const HISTOGRAM_STORAGE = 'nini_live_histogram';
 const QUICK_BAR_STORAGE = 'nini_live_quick_bar';
 const FPS_STORAGE = 'nini_live_fps';
 const FOCUS_PEAKING_STORAGE = 'nini_focus_peaking';
+const LIVE_QUALITY_STORAGE = 'nini_live_quality';
 const FPS_OPTIONS = [5, 10, 15, 30];
 const APP_TIMER_DELAY_KEY = 'nini_app_self_timer_delay';
 const APP_TIMER_SHOTS_KEY = 'nini_app_self_timer_shots';
@@ -95,6 +96,14 @@ function initialFocusPeaking() {
     };
   } catch {
     return { enabled: false, threshold: 30 };
+  }
+}
+
+function initialLiveQuality() {
+  try {
+    return localStorage.getItem(LIVE_QUALITY_STORAGE) === 'standard' ? 'standard' : 'extended';
+  } catch {
+    return 'extended';
   }
 }
 
@@ -171,6 +180,9 @@ export default function LiveViewScreen() {
   const [focusPeaking, setFocusPeaking] = useState(initialFocusPeaking);
   const [focusPanelOpen, setFocusPanelOpen] = useState(false);
   const [focusInfo, setFocusInfo] = useState({ mode: '--', focalLength: '--' });
+  const [focusPoint, setFocusPoint] = useState({ x: 0.5, y: 0.5 });
+  const [liveQuality, setLiveQuality] = useState(initialLiveQuality);
+  const [activeQuality, setActiveQuality] = useState(initialLiveQuality);
   const [afState, setAfState] = useState('idle');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -186,6 +198,7 @@ export default function LiveViewScreen() {
   const lvStartingRef = useRef(false);
   const frameStatsRef = useRef({ count: 0, startedAt: performance.now() });
   const targetFpsRef = useRef(targetFps || 10);
+  const liveQualityRef = useRef(liveQuality);
   const frameErrorCountRef = useRef(0);
   const lastFrameAtRef = useRef(0);
   const lastHistogramAtRef = useRef(0);
@@ -230,6 +243,11 @@ export default function LiveViewScreen() {
       drawFocusPeaking(liveImgRef.current, canvas, focusPeaking.threshold);
     }
   }, [focusPeaking]);
+
+  useEffect(() => {
+    liveQualityRef.current = liveQuality;
+    try { localStorage.setItem(LIVE_QUALITY_STORAGE, liveQuality); } catch {}
+  }, [liveQuality]);
 
   useEffect(() => {
     try { localStorage.setItem(MONITOR_STORAGE, String(monitorMode)); } catch {}
@@ -300,9 +318,10 @@ export default function LiveViewScreen() {
         let result = null;
         let failed = false;
         try {
-          result = await camera.getLiveViewFrame();
+          result = await camera.getLiveViewFrame({ quality: liveQualityRef.current });
           if (!mountedRef.current || !lvRunningRef.current) return;
           if (result?.frame) {
+            if (result.quality) setActiveQuality(result.quality);
             frameErrorCountRef.current = 0;
             frameCacheRef.current = result.frame;
             const frameUrl = result.frame.startsWith('data:')
@@ -556,7 +575,22 @@ export default function LiveViewScreen() {
     const rect = host.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const focusOk = await doAF();
+    let focusOk = false;
+    if (guideRect && imageSize.width > 0 && imageSize.height > 0) {
+      const inside = x >= guideRect.left && x <= guideRect.left + guideRect.width
+        && y >= guideRect.top && y <= guideRect.top + guideRect.height;
+      if (inside) {
+        const nx = Math.max(0, Math.min(1, (x - guideRect.left) / guideRect.width));
+        const ny = Math.max(0, Math.min(1, (y - guideRect.top) / guideRect.height));
+        setFocusPoint({ x: nx, y: ny });
+        try {
+          await camera.setAfArea(nx * imageSize.width, ny * imageSize.height);
+        } catch (e) {
+          setLvError(`对焦点移动失败：${e.message || e}`);
+        }
+      }
+    }
+    focusOk = await doAF();
     const dot = document.createElement('div');
     dot.className = 'absolute w-7 h-7 rounded-full pointer-events-none z-30';
     dot.style.border = `2px solid ${focusOk ? 'var(--green)' : 'var(--red)'}`;
@@ -742,6 +776,12 @@ export default function LiveViewScreen() {
     }
     guideRect = { left: (viewport.width - width) / 2, top: (viewport.height - height) / 2, width, height };
   }
+  const focusMarkerStyle = focusPoint && guideRect ? {
+    left: guideRect.left + focusPoint.x * guideRect.width - 24,
+    top: guideRect.top + focusPoint.y * guideRect.height - 19,
+    width: 48,
+    height: 38,
+  } : null;
 
   return (
     <div className="h-full w-full relative overflow-hidden bg-black text-white">
@@ -814,7 +854,15 @@ export default function LiveViewScreen() {
             <span className={`rounded-full border px-2 py-1 flex items-center gap-1 ${focusPeaking.enabled ? 'border-[var(--accent)]/60 bg-black/55 text-[var(--accent)]' : 'border-white/12 bg-black/45 text-white/55'}`}>
               <ScanLine size={10} /> 峰值
             </span>
+            <span className="rounded-full border border-white/12 bg-black/45 px-2 py-1 text-white/70">{activeQuality === 'extended' ? '扩展' : '标准'}</span>
             {afLabel && <span className={`rounded-full border px-2 py-1 bg-black/55 ${afState === 'failed' ? 'border-[var(--red)]/60 text-[var(--red)]' : afState === 'locked' ? 'border-[var(--green)]/60 text-[var(--green)]' : 'border-white/20 text-white/75'}`}>{afLabel}</span>}
+          </div>
+        )}
+
+        {focusMarkerStyle && (
+          <div className="absolute z-30 pointer-events-none" style={focusMarkerStyle}>
+            <div className="absolute inset-0 border border-[var(--accent)]/85 rounded-[3px] shadow-[0_0_0_1px_rgba(0,0,0,.55)]" />
+            <div className="absolute left-1/2 top-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 border-l border-t border-[var(--accent)]" />
           </div>
         )}
 
@@ -1015,6 +1063,14 @@ export default function LiveViewScreen() {
             onChange={event => setFocusPeaking(value => ({ ...value, threshold: Number(event.target.value) }))}
             className="w-full accent-[var(--accent)]"
           />
+          <div className="flex items-center justify-between text-[9px] text-white/45 mt-3 mb-1">
+            <span>取景画质</span>
+            <span className="mono">{activeQuality === 'extended' ? '扩展流' : '标准流'}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button className={`grid-chip ${liveQuality === 'standard' ? 'active' : ''}`} onClick={() => setLiveQuality('standard')}>标准</button>
+            <button className={`grid-chip ${liveQuality === 'extended' ? 'active' : ''}`} onClick={() => setLiveQuality('extended')}>扩展高清</button>
+          </div>
         </div>
       )}
 

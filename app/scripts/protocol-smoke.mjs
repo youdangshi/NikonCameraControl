@@ -214,5 +214,19 @@ const catalog = buildControlCatalog({ shutter: { ...parsedDesc, responseCode: 0x
 if (!catalog.shutterOptions.includes('1/40') || !catalog.shutterOptions.includes('1/50')) {
   throw new Error(`catalog should include 1/40 and 1/50, got ${catalog.shutterOptions.slice(0, 8).join(',')}`);
 }
+assertEqual(catalog.shutterRawByLabel['1/40'], 25000, 'catalog keeps exact shutter raw value');
+const narrowShutterDescPayload = new Uint8Array(21);
+writeU16(narrowShutterDescPayload, 0, PTP_PROP.ExposureTime);
+writeU16(narrowShutterDescPayload, 2, 0x0006);
+narrowShutterDescPayload[4] = 0x01;
+writeU32(narrowShutterDescPayload, 5, 250);
+writeU32(narrowShutterDescPayload, 9, 250);
+narrowShutterDescPayload[13] = 0x02;
+writeU16(narrowShutterDescPayload, 14, 1);
+writeU32(narrowShutterDescPayload, 16, 250);
+const narrowCatalog = buildControlCatalog({ shutter: { ...parseDevicePropDesc(narrowShutterDescPayload), responseCode: 0x2001 } });
+if (narrowCatalog.shutterOptions.join(',') !== '1/40') {
+  throw new Error(`catalog must not invent unsupported shutter values, got ${narrowCatalog.shutterOptions.join(',')}`);
+}
 
 console.log('protocol smoke tests passed');

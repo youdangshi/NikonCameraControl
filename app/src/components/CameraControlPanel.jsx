@@ -318,7 +318,7 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
 
       <div className="flex gap-2">
         <StepControl label="ISO" value={iso ?? '--'} values={isoOptions} onChange={async value => { if (await setProp(PTP_PROP.ExposureIndex, value, 'ISO')) setIso(value); }} disabled={expMode === 'AUTO'} icon={Sun} />
-        <StepControl label="快门" value={shutLabel} values={shutterOptions} onChange={async value => { if (await setProp(PTP_PROP.ExposureTime, shutterLabelToMicros(value), '快门')) setShutterI(shutterOptions.indexOf(value)); }} disabled={expMode === 'A' || expMode === 'P'} icon={Timer} />
+        <StepControl label="快门" value={shutLabel} values={shutterOptions} onChange={async value => { const micros = catalog.shutterRawByLabel?.[value] ?? shutterLabelToMicros(value); if (await setProp(PTP_PROP.ExposureTime, micros, '快门')) setShutterI(shutterOptions.indexOf(value)); }} disabled={expMode === 'A' || expMode === 'P'} icon={Timer} />
         <StepControl label="光圈" value={apLabel} values={apertureOptions} onChange={async value => { if (await setProp(PTP_PROP.FNumber, apertureLabelToHundredths(value), '光圈')) setApertureI(apertureOptions.indexOf(value)); }} disabled={expMode === 'S' || expMode === 'P'} icon={Aperture} />
       </div>
 

@@ -328,12 +328,16 @@ export default function LiveViewScreen() {
           if (mountedRef.current) setLvError(`取景中断：${e.message || e}`);
         }
         if (result?.code || failed) frameErrorCountRef.current += 1;
-        if (frameErrorCountRef.current >= 10) {
+        if (frameErrorCountRef.current >= 5) {
           lvRunningRef.current = false;
           await camera.stopLiveView().catch(() => {});
           if (mountedRef.current) {
             setLvOn(false);
-            setLvError('\u5b9e\u65f6\u53d6\u666f\u8fde\u7eed\u65e0\u54cd\u5e94\uff0c\u5df2\u505c\u6b62\u8f6e\u8be2\u3002\u8bf7\u91cd\u65b0\u8fdb\u5165\u53d6\u666f\u6216\u91cd\u542f\u76f8\u673a\u53d6\u666f\u3002');
+            setLvError('取景暂时中断，正在自动恢复…');
+            if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+            restartTimerRef.current = setTimeout(() => {
+              if (mountedRef.current) startLV();
+            }, 1400);
           }
           return;
         }
@@ -501,12 +505,11 @@ export default function LiveViewScreen() {
     }
     setCountdown(0);
     try {
+      // Z-series bodies can reject InitiateCaptureRecInMedia while the live-view
+      // stream is active. End the stream first, then capture to the card.
+      if (lvRunningRef.current) await stopLV(false);
+      await new Promise(resolve => setTimeout(resolve, 420));
       let result = await camera.capture();
-      if (!result?.success && result?.code === 0x2019 && lvRunningRef.current) {
-        await stopLV(false);
-        await new Promise(resolve => setTimeout(resolve, 320));
-        result = await camera.capture();
-      }
       if (!result?.success) throw new Error(result?.code != null ? `PTP 0x${Number(result.code).toString(16)}` : '相机没有确认拍照');
       for (let shot = 1; shot < timerShots; shot += 1) {
         await new Promise(resolve => setTimeout(resolve, 650));
@@ -682,7 +685,8 @@ export default function LiveViewScreen() {
       const index = values.indexOf(quick.shutter);
       const nextIndex = index < 0 ? 0 : Math.max(0, Math.min(values.length - 1, index + direction));
       const value = values[nextIndex];
-      if (value && await setQuickProp(PTP_PROP.ExposureTime, shutterLabelToMicros(value), '快门')) {
+      const micros = quickCatalog.shutterRawByLabel?.[value] ?? shutterLabelToMicros(value);
+      if (value && await setQuickProp(PTP_PROP.ExposureTime, micros, '快门')) {
         setQuick(previous => ({ ...previous, shutter: value }));
       }
       return;

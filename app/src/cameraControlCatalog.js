@@ -52,14 +52,23 @@ export function buildControlCatalog(descriptors = {}) {
     (apertureFromCamera || knownValuesInRange(APERTURE_LABELS.map(label => Number(label.slice(1)) * 100), apertureDesc))
       .map(raw => fNumberLabel(raw)),
   ).sort((a, b) => parseAperture(a) - parseAperture(b));
-  const shutterOptions = sortShutter(
-    (shutterRawFromCamera || [])
-      .map(raw => nikonExposureRawToMicros(raw))
-      .filter(micros => micros >= 200 && micros <= 30_000_000)
-      .map(micros => exposureTimeMicrosToLabel(micros))
-      .filter(label => label !== '--')
-      .concat(SHUTTER_LABELS),
-  );
+  const cameraShutterOptions = (shutterRawFromCamera || [])
+    .map(raw => {
+      const micros = nikonExposureRawToMicros(raw);
+      return { raw: Number(raw), micros, label: exposureTimeMicrosToLabel(micros) };
+    })
+    .filter(item => item.micros >= 200 && item.micros <= 30_000_000 && item.label !== '--');
+  // Prefer the camera's own enumeration. Mixing in the generic list makes the
+  // UI offer values that Z-series bodies can reject with PTP 0x201C.
+  const shutterOptions = sortShutter(cameraShutterOptions.length
+    ? cameraShutterOptions.map(item => item.label)
+    : SHUTTER_LABELS);
+  const shutterRawByLabel = {};
+  if (cameraShutterOptions.length) {
+    cameraShutterOptions.forEach(item => { shutterRawByLabel[item.label] = item.micros; });
+  } else {
+    SHUTTER_LABELS.forEach(label => { shutterRawByLabel[label] = shutterLabelToMicros(label); });
+  }
   const shutterRange = shutterOptions.length
     ? `${shutterOptions[shutterOptions.length - 1]}–${shutterOptions[0]}`
     : '';
@@ -72,6 +81,7 @@ export function buildControlCatalog(descriptors = {}) {
   return {
     isoOptions: isoOptions.length ? isoOptions : ISO_VALUES,
     shutterOptions: shutterOptions.length ? shutterOptions : SHUTTER_LABELS,
+    shutterRawByLabel,
     apertureOptions: apertureOptions.length ? apertureOptions : APERTURE_LABELS,
     summary,
   };

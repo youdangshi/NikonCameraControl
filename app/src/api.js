@@ -41,6 +41,7 @@ let lastConnectRequest = null;
 let autoReconnectTimer = null;
 let autoReconnectAttempts = 0;
 let manualDisconnect = false;
+let lastLiveViewRecoveryAt = 0;
 
 const MAX_DIAGNOSTIC_EVENTS = 200;
 let diagnosticEvents = [];
@@ -998,6 +999,15 @@ export const camera = {
         if (resp.responseCode === 0x2001 || resp.responseCode !== 0x2019) break;
         await new Promise(resolve => setTimeout(resolve, 80));
       }
+      if (resp.responseCode === 0xA00B && Date.now() - lastLiveViewRecoveryAt > 3000) {
+        lastLiveViewRecoveryAt = Date.now();
+        try {
+          await this.stopLiveView();
+          await new Promise(resolve => setTimeout(resolve, 420));
+          await this.startLiveView();
+          resp = await mobileSession.command(frameOp, [], 12000);
+        } catch {}
+      }
       if (resp.responseCode !== 0x2001) return { frame: null, code: resp.responseCode, direct: true };
       const jpeg = extractJpeg(resp.payload);
       if (!jpeg) return { frame: null, direct: true };
@@ -1034,7 +1044,18 @@ export const camera = {
       if (sResp.responseCode !== 0x2001) {
         throw new Error(`读取相机存储卡失败：PTP 0x${sResp.responseCode.toString(16)}`);
       }
-      const storageIds = parseU32List(sResp.payload).filter(id => id && id !== 0xFFFFFFFF);
+      const rawStorageWords = parseU32List(sResp.payload);
+      // PTP StorageIDs is an array: UINT32 count followed by that many IDs.
+      const declaredCount = rawStorageWords[0] || 0;
+      const declaredIds = declaredCount > 0
+        ? rawStorageWords.slice(1, 1 + declaredCount)
+        : rawStorageWords.slice(1);
+      const swapBytes = value => (((value & 0xff) << 24) | ((value & 0xff00) << 8) | ((value >>> 8) & 0xff00) | ((value >>> 24) & 0xff)) >>> 0;
+      const storageIds = Array.from(new Set([
+        ...declaredIds,
+        ...declaredIds.map(swapBytes),
+        0xFFFFFFFF,
+      ])).filter((id, index, values) => id && values.indexOf(id) === index);
       if (!storageIds.length) return [];
       console.log('[相机照片] 存储卡', storageIds.map(id => `0x${id.toString(16)}`));
 

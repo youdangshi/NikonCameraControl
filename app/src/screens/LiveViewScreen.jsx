@@ -20,6 +20,7 @@ import {
   exposureTimeMicrosToLabel,
   fNumberLabel,
   focusModeLabel,
+  focalLengthLabel,
 } from '../nikonProperties.js';
 import {
   ArrowLeft, Aperture, BarChart3, Camera, ChevronDown, ChevronUp, Grid3X3, Monitor, RotateCcw, ScanLine, SlidersHorizontal, UserRound,
@@ -169,7 +170,7 @@ export default function LiveViewScreen() {
   const [guide, setGuide] = useState(initialGuide);
   const [focusPeaking, setFocusPeaking] = useState(initialFocusPeaking);
   const [focusPanelOpen, setFocusPanelOpen] = useState(false);
-  const [focusInfo, setFocusInfo] = useState({ mode: '--', focalLength: null });
+  const [focusInfo, setFocusInfo] = useState({ mode: '--', focalLength: '--' });
   const [afState, setAfState] = useState('idle');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -458,7 +459,7 @@ export default function LiveViewScreen() {
       }));
       setFocusInfo(previous => ({
         mode: focusRaw == null ? previous.mode : focusModeLabel(focusRaw),
-        focalLength: focalLengthRaw == null ? previous.focalLength : Number(focalLengthRaw),
+        focalLength: focalLengthRaw == null ? previous.focalLength : focalLengthLabel(focalLengthRaw),
       }));
       timer = setTimeout(sync, 3000);
     };
@@ -480,6 +481,7 @@ export default function LiveViewScreen() {
     lvStartingRef.current = false;
     if (lvTimerRef.current) clearTimeout(lvTimerRef.current);
     if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    if (afStateTimerRef.current) clearTimeout(afStateTimerRef.current);
     camera.stopLiveView().catch(() => {});
   }, []);
 
@@ -587,9 +589,6 @@ export default function LiveViewScreen() {
   };
 
   const guideLabel = COMPOSITION_MODES.find(item => item.id === guide.mode)?.label || '构图线';
-  const focalLengthLabel = Number.isFinite(focusInfo.focalLength) && focusInfo.focalLength > 0
-    ? `${Math.round(focusInfo.focalLength)} mm`
-    : '--';
   const afLabel = afState === 'focusing' ? '对焦中' : afState === 'locked' ? 'AF 锁定' : afState === 'failed' ? 'AF 失败' : '';
   const toggleOrientation = async () => {
     const next = !landscape;
@@ -807,7 +806,7 @@ export default function LiveViewScreen() {
         {hasFrame && (
           <div className="absolute left-3 top-[68px] z-30 pointer-events-none flex items-center gap-1.5 text-[9px]">
             <span className="rounded-full border border-white/12 bg-black/45 px-2 py-1 text-white/70">{focusInfo.mode || '--'}</span>
-            <span className="rounded-full border border-white/12 bg-black/45 px-2 py-1 text-white/70">{focalLengthLabel}</span>
+            <span className="rounded-full border border-white/12 bg-black/45 px-2 py-1 text-white/70">{focusInfo.focalLength}</span>
             <span className={`rounded-full border px-2 py-1 flex items-center gap-1 ${focusPeaking.enabled ? 'border-[var(--accent)]/60 bg-black/55 text-[var(--accent)]' : 'border-white/12 bg-black/45 text-white/55'}`}>
               <ScanLine size={10} /> 峰值
             </span>

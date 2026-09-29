@@ -12,6 +12,7 @@ import {
   apertureLabelToHundredths,
   exposureCompensationToMilliEv,
   focusModeLabel,
+  focalLengthLabel,
 } from '../src/nikonProperties.js';
 import { parseDevicePropDesc } from '../src/ptpPropertyDesc.js';
 import { buildControlCatalog } from '../src/cameraControlCatalog.js';
@@ -182,6 +183,7 @@ assertEqual(WHITE_BALANCE_CODES.CLOUDY, 32784, 'white balance cloudy');
 assertEqual(METERING_CODES.MATRIX, 3, 'metering matrix');
 assertEqual(FOCUS_MODE_CODES['AF-S'], 32784, 'focus AF-S');
 assertEqual(focusModeLabel(FOCUS_MODE_CODES['AF-S']), 'AF-S', 'display focus AF-S');
+assertEqual(focalLengthLabel(1600), '16 mm', 'Nikon focal length hundredths of a millimeter');
 assertEqual(DRIVE_MODE_CODES.CH, 2, 'drive CH');
 
 assertBytes(encodePropValue(PTP_PROP.WhiteBalance, WHITE_BALANCE_CODES.CLOUDY), [0x10, 0x80], 'WB UINT16');

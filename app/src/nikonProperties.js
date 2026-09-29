@@ -315,6 +315,13 @@ export function fNumberLabel(value) {
   return `F${Number.isInteger(f) ? f.toFixed(0) : f.toFixed(1)}`;
 }
 
+export function focalLengthLabel(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return '--';
+  const millimeters = number / 100;
+  return `${Number.isInteger(millimeters) ? millimeters.toFixed(0) : millimeters.toFixed(1)} mm`;
+}
+
 export function reverseEnumCode(table, key) {
   const value = table?.[key];
   return typeof value === 'number' ? value : null;

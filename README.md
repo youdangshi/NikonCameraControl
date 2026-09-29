@@ -4,7 +4,7 @@
 
 妮妮通过 USB Type-C、相机 WiFi 热点或 STA 局域网连接相机，在手机上完成实时取景、曝光参数控制、自动对焦、遥控拍摄、相机照片读取和本地修图。项目重点解决 Nikon Z30 真机控制链路，并为后续多机型、多品牌适配建立独立协议层。
 
-> 当前版本：`v1.12.0`
+> 当前版本：`v1.12.1`
 > <br>
 > 真机验证设备：Nikon Z30 + Redmi M2011K2C（Android 13）
 > <br>
@@ -27,6 +27,7 @@
 - 默认横屏显示，可切换横竖屏，不强制裁切相机画面。
 - 显示 RGB 与亮度直方图。
 - 专业构图辅助：三分线、黄金分割、精密网格、中心构图、对角引导和水平仪。
+- 峰值辅助对焦：实时高亮画面锐利边缘，可调灵敏度，并显示对焦模式、焦距与 AF 状态。
 - 直接调节曝光模式、ISO、快门、光圈、曝光补偿、白平衡、测光和驱动模式。
 - 读取相机当前档位，支持 `M / A / S / P / AUTO / U1 / U2 / U3`。
 - 自动对焦、触摸对焦和遥控拍摄。
@@ -93,9 +94,9 @@
 
 https://github.com/youdangshi/NikonCameraControl/releases/latest
 
-当前 `v1.12.0` 安装包：
+当前 `v1.12.1` 安装包：
 
-https://github.com/youdangshi/NikonCameraControl/releases/download/v1.12.0/Nini-1.12.0-debug.apk
+https://github.com/youdangshi/NikonCameraControl/releases/download/v1.12.1/Nini-1.12.1-debug.apk
 
 要求：
 

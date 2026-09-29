@@ -222,15 +222,15 @@ function descriptorByteLength(descriptor) {
 }
 
 export function encodePropValue(propCode, value, descriptor = null) {
-  const describedLength = descriptorByteLength(descriptor);
-  if (describedLength > 0) {
-    return writeLittleEndian(Math.round(value), describedLength);
-  }
   if (propCode === PTP_PROP.ExposureBiasCompensation) {
     return writeLittleEndian(Math.round(value), 2);
   }
   if (propCode === PTP_PROP.ExposureTime) {
     return writeLittleEndian(nikonExposureMicrosToRaw(value), 4);
+  }
+  const describedLength = descriptorByteLength(descriptor);
+  if (describedLength > 0) {
+    return writeLittleEndian(Math.round(value), describedLength);
   }
   if (UINT8_PROPS.has(propCode)) {
     return writeLittleEndian(Math.round(value), 1);
@@ -251,10 +251,6 @@ function readU32LE(bytes, offset) {
 
 export function decodePropValue(payload, propCode, descriptor = null) {
   if (!payload || payload.length === 0) return 0;
-  const describedLength = descriptorByteLength(descriptor);
-  if (describedLength === 1) return payload[0];
-  if (describedLength === 2 && payload.length >= 2) return readU16LE(payload, 0);
-  if (describedLength === 4 && payload.length >= 4) return readU32LE(payload, 0);
   if (propCode === PTP_PROP.ExposureBiasCompensation && payload.length >= 2) {
     const value = readU16LE(payload, 0);
     return value >= 0x8000 ? value - 0x10000 : value;
@@ -262,6 +258,10 @@ export function decodePropValue(payload, propCode, descriptor = null) {
   if (propCode === PTP_PROP.ExposureTime && payload.length >= 4) {
     return nikonExposureRawToMicros(readU32LE(payload, 0));
   }
+  const describedLength = descriptorByteLength(descriptor);
+  if (describedLength === 1) return payload[0];
+  if (describedLength === 2 && payload.length >= 2) return readU16LE(payload, 0);
+  if (describedLength === 4 && payload.length >= 4) return readU32LE(payload, 0);
   if (UINT16_PROPS.has(propCode) && payload.length >= 2) return readU16LE(payload, 0);
   return payload.length >= 4 ? readU32LE(payload, 0) : payload[0];
 }

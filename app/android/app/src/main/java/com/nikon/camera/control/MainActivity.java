@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(TcpSocketPlugin.class);
         registerPlugin(UsbPtpPlugin.class);
         registerPlugin(CameraUiPlugin.class);
+        registerPlugin(AppUpdaterPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

@@ -8,6 +8,7 @@ import {
   encodePropValue,
   decodePropValue,
   shutterLabelToMicros,
+  exposureTimeMicrosToLabel,
   apertureLabelToHundredths,
   exposureCompensationToMilliEv,
 } from '../src/nikonProperties.js';
@@ -187,6 +188,10 @@ assertEqual(decodePropValue(new Uint8Array([0xb3, 0xfe]), PTP_PROP.ExposureBiasC
 assertEqual(decodePropValue(new Uint8Array([3, 0]), PTP_PROP.ExposureMeteringMode), 3, 'decode UINT16 property');
 assertBytes(encodePropValue(PTP_PROP.ExposureTime, 25000), [0xfa, 0x00, 0x00, 0x00], 'Nikon 1/40 shutter encoding');
 assertEqual(decodePropValue(new Uint8Array([0xfa, 0x00, 0x00, 0x00]), PTP_PROP.ExposureTime), 25000, 'Nikon shutter decode to microseconds');
+assertEqual(exposureTimeMicrosToLabel(decodePropValue(new Uint8Array([0xfa, 0x00, 0x00, 0x00]), PTP_PROP.ExposureTime)), '1/40', 'Nikon raw shutter 250 must display as 1/40');
+assertBytes(encodePropValue(PTP_PROP.ExposureTime, shutterLabelToMicros('1/40')), [0xfa, 0x00, 0x00, 0x00], 'Nikon UI 1/40 must write raw 250');
+assertBytes(encodePropValue(PTP_PROP.ExposureTime, 25000, { dataType: 0x0006 }), [0xfa, 0x00, 0x00, 0x00], 'descriptor must not override Nikon shutter scale');
+assertEqual(decodePropValue(new Uint8Array([0xfa, 0x00, 0x00, 0x00]), PTP_PROP.ExposureTime, { dataType: 0x0006 }), 25000, 'descriptor shutter decode keeps 100us scale');
 
 const descPayload = new Uint8Array(25);
 writeU16(descPayload, 0, PTP_PROP.ExposureTime);

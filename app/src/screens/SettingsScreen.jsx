@@ -1,5 +1,6 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { AppContext } from '../App.jsx';
+import { appUpdater } from '../appUpdater.js';
 import {
   AI_PROVIDERS,
   AI_PROVIDER_PRESETS,
@@ -7,7 +8,7 @@ import {
 } from '../ai.js';
 import { POSE_ITEMS } from '../components/PoseLibrary.jsx';
 import {
-  Bot, Cable, Camera, Check, Info, KeyRound, Palette, RefreshCw, Save, SlidersHorizontal, UserRound,
+  Bot, Cable, Camera, Check, Download, Info, KeyRound, Palette, RefreshCw, Save, SlidersHorizontal, UserRound,
 } from 'lucide-react';
 import { getNikonModelCatalog } from '../nikonModels.js';
 import { getAdapterCatalog } from '../cameraAdapters.js';
@@ -34,6 +35,10 @@ export default function SettingsScreen() {
   const [models, setModels] = useState([]);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelError, setModelError] = useState('');
+  const [appInfo, setAppInfo] = useState(null);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState('');
   const pose = state.poseGuides;
   const providerId = state.aiSettings.provider || 'deepseek';
   const providerPreset = AI_PROVIDER_PRESETS[providerId] || AI_PROVIDER_PRESETS.deepseek;
@@ -86,9 +91,98 @@ export default function SettingsScreen() {
     }
   };
 
+  const checkAppUpdate = async () => {
+    setUpdateBusy(true);
+    setUpdateMessage('');
+    try {
+      const info = await appUpdater.getAppInfo();
+      setAppInfo(info);
+      const result = await appUpdater.checkForUpdate();
+      setUpdateInfo(result);
+      setUpdateMessage(result.updateAvailable
+        ? '\u53d1\u73b0\u65b0\u7248\u672c\uff0c\u53ef\u76f4\u63a5\u4e0b\u8f7d\u5b89\u88c5\u3002'
+        : '\u5f53\u524d\u5df2\u662f\u6700\u65b0\u7248\u672c\u3002');
+    } catch (error) {
+      setUpdateMessage(error?.message || String(error));
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const installAppUpdate = async () => {
+    if (!updateInfo?.assetUrl) return;
+    setUpdateBusy(true);
+    setUpdateMessage('');
+    try {
+      const result = await appUpdater.downloadAndInstall(updateInfo);
+      setUpdateMessage(result?.needsPermission
+        ? '\u5df2\u6253\u5f00\u5b89\u88c5\u672a\u77e5\u5e94\u7528\u6743\u9650\uff0c\u6388\u4e88\u540e\u8fd4\u56de\u5c06\u81ea\u52a8\u7ee7\u7eed\u5b89\u88c5\u3002'
+        : '\u5b89\u88c5\u5668\u5df2\u6253\u5f00\u3002');
+    } catch (error) {
+      setUpdateMessage(error?.message || String(error));
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    checkAppUpdate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="page">
       <div className="page-inner space-y-4">
+        <Section
+          icon={Download}
+          title={'\u8f6f\u4ef6\u66f4\u65b0'}
+          description={'\u81ea\u52a8\u68c0\u67e5 GitHub Releases\uff0c\u5e76\u5728\u5e94\u7528\u5185\u4e0b\u8f7d\u5b89\u88c5'}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold">
+                {'\u5f53\u524d\u7248\u672c '}
+                <span className="mono text-[var(--accent)]">{appInfo?.versionName || '--'}</span>
+              </p>
+              {updateInfo?.latestVersion && (
+                <p className="mt-1 text-[9px] text-[var(--text-muted)] mono">
+                  {'\u6700\u65b0\u7248\u672c '}{updateInfo.latestVersion}
+                </p>
+              )}
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={checkAppUpdate} disabled={updateBusy}>
+              <RefreshCw size={14} className={updateBusy ? 'animate-spin' : ''} />
+              {'\u68c0\u67e5\u66f4\u65b0'}
+            </button>
+          </div>
+          {updateInfo?.updateAvailable && (
+            <div className="mt-3 rounded-md border border-[var(--accent)]/35 bg-[var(--accent)]/8 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-[var(--accent)]">
+                    {updateInfo.releaseName || updateInfo.latestVersion}
+                  </p>
+                  <p className="mt-1 text-[9px] text-[var(--text-muted)] mono truncate">
+                    {updateInfo.assetName || ''}
+                  </p>
+                </div>
+                <button type="button" className="btn btn-primary flex-shrink-0" onClick={installAppUpdate} disabled={updateBusy}>
+                  <Download size={14} />
+                  {'\u4e0b\u8f7d\u5b89\u88c5'}
+                </button>
+              </div>
+              {updateInfo.notes && (
+                <p className="mt-2 text-[9px] leading-4 text-[var(--text-soft)] whitespace-pre-wrap max-h-24 overflow-auto">
+                  {updateInfo.notes.slice(0, 600)}
+                </p>
+              )}
+            </div>
+          )}
+          {updateMessage && (
+            <p className="mt-3 text-[10px] leading-4 text-[var(--text-muted)]">{updateMessage}</p>
+          )}
+        </Section>
+
         <div>
           <p className="section-label">偏好设置</p>
           <h1 className="text-xl font-bold mt-1">设置</h1>

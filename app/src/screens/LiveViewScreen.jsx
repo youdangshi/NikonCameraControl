@@ -38,6 +38,8 @@ const HISTOGRAM_STORAGE = 'nini_live_histogram';
 const QUICK_BAR_STORAGE = 'nini_live_quick_bar';
 const FPS_STORAGE = 'nini_live_fps';
 const FPS_OPTIONS = [5, 10, 15, 30];
+const APP_TIMER_DELAY_KEY = 'nini_app_self_timer_delay';
+const APP_TIMER_SHOTS_KEY = 'nini_app_self_timer_shots';
 
 function initialGuide() {
   try {
@@ -87,6 +89,7 @@ export default function LiveViewScreen() {
   const [hasFrame, setHasFrame] = useState(false);
   const [captured, setCaptured] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   const [lvError, setLvError] = useState('');
   const [fps, setFps] = useState(0);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -400,6 +403,13 @@ export default function LiveViewScreen() {
     }
     setCapturing(true);
     setLvError('');
+    const timerDelay = Math.max(0, Number(localStorage.getItem(APP_TIMER_DELAY_KEY)) || 0);
+    const timerShots = Math.max(1, Number(localStorage.getItem(APP_TIMER_SHOTS_KEY)) || 1);
+    for (let remaining = timerDelay; remaining > 0; remaining -= 1) {
+      setCountdown(remaining);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    setCountdown(0);
     try {
       let result = await camera.capture();
       if (!result?.success && result?.code === 0x2019 && lvRunningRef.current) {
@@ -408,6 +418,11 @@ export default function LiveViewScreen() {
         result = await camera.capture();
       }
       if (!result?.success) throw new Error(result?.code != null ? `PTP 0x${Number(result.code).toString(16)}` : '相机没有确认拍照');
+      for (let shot = 1; shot < timerShots; shot += 1) {
+        await new Promise(resolve => setTimeout(resolve, 650));
+        const extra = await camera.capture();
+        if (!extra?.success) break;
+      }
       setCaptured(true);
       setTimeout(() => mountedRef.current && setCaptured(false), 900);
       if (lvRunningRef.current) await stopLV(false);
@@ -417,6 +432,7 @@ export default function LiveViewScreen() {
     } catch (e) {
       setLvError(`拍照失败：${e.message || e}`);
     } finally {
+      if (mountedRef.current) setCountdown(0);
       if (mountedRef.current) setCapturing(false);
     }
   };
@@ -514,12 +530,28 @@ export default function LiveViewScreen() {
     setFps(0);
   };
 
+  const quickControlDisabled = (kind) => {
+    if (kind === 'mode') return false;
+    if (quick.expMode === 'AUTO') return kind === 'shutter' || kind === 'aperture' || kind === 'iso';
+    if (kind === 'shutter') return quick.expMode === 'A' || quick.expMode === 'P';
+    if (kind === 'aperture') return quick.expMode === 'S' || quick.expMode === 'P';
+    return false;
+  };
+
   const adjustQuick = async (kind, direction) => {
     if (staTransferOnly) return;
-    if ((kind === 'shutter' || kind === 'aperture') && (quick.expMode === 'P')) return;
-    if (kind === 'shutter' && quick.expMode === 'A') return;
-    if (kind === 'aperture' && quick.expMode === 'S') return;
-    if (kind === 'iso' && quick.expMode === 'AUTO') return;
+    if (quick.expMode === 'AUTO' && (kind === 'shutter' || kind === 'aperture' || kind === 'iso')) {
+      setQuickError('AUTO \u6a21\u5f0f\u4e0b\u5feb\u95e8\u3001\u5149\u5708\u548c ISO \u7531\u76f8\u673a\u81ea\u52a8\u63a7\u5236\uff0c\u8bf7\u5148\u5207\u6362\u5230 M / S / A\u3002');
+      return;
+    }
+    if (kind === 'shutter' && (quick.expMode === 'A' || quick.expMode === 'P')) {
+      setQuickError('\u5f53\u524d\u66dd\u5149\u6a21\u5f0f\u4e0d\u5141\u8bb8\u624b\u52a8\u8c03\u8282\u5feb\u95e8\uff0c\u8bf7\u5148\u5207\u6362\u5230 M \u6216 S\u3002');
+      return;
+    }
+    if (kind === 'aperture' && (quick.expMode === 'S' || quick.expMode === 'P')) {
+      setQuickError('\u5f53\u524d\u66dd\u5149\u6a21\u5f0f\u4e0d\u5141\u8bb8\u624b\u52a8\u8c03\u8282\u5149\u5708\uff0c\u8bf7\u5148\u5207\u6362\u5230 M \u6216 A\u3002');
+      return;
+    }
 
     if (kind === 'mode') {
       const index = EXPOSURE_MODE_OPTIONS.indexOf(quick.expMode);
@@ -704,6 +736,14 @@ export default function LiveViewScreen() {
           />
         )}
 
+        {countdown > 0 && (
+          <div className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center bg-black/25">
+            <div className="w-24 h-24 rounded-full border-4 border-white/75 bg-black/45 flex items-center justify-center">
+              <span className="mono text-4xl font-bold text-white">{countdown}</span>
+            </div>
+          </div>
+        )}
+
         {captured && (
           <div className="absolute inset-0 bg-black/45 flex items-center justify-center z-40 pointer-events-none">
             <div className="w-16 h-16 rounded-full border border-white/40 bg-black/45 flex items-center justify-center">
@@ -732,6 +772,7 @@ export default function LiveViewScreen() {
               type="button"
               className="w-8 h-full flex items-center justify-center text-white/65 active:bg-white/10"
               onClick={() => adjustQuick(item.kind, -1)}
+              disabled={quickControlDisabled(item.kind)}
               aria-label={`${item.label}减小`}
             >
               −
@@ -749,6 +790,7 @@ export default function LiveViewScreen() {
               type="button"
               className="w-8 h-full flex items-center justify-center text-white/65 active:bg-white/10"
               onClick={() => adjustQuick(item.kind, 1)}
+              disabled={quickControlDisabled(item.kind)}
               aria-label={`${item.label}增大`}
             >
               +

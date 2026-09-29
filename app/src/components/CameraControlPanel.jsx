@@ -30,6 +30,9 @@ import {
   buildControlCatalog,
 } from '../cameraControlCatalog.js';
 
+const APP_TIMER_DELAY_KEY = 'nini_app_self_timer_delay';
+const APP_TIMER_SHOTS_KEY = 'nini_app_self_timer_shots';
+
 function nearestIndex(values, target) {
   let best = -1;
   let distance = Infinity;
@@ -148,6 +151,14 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
   const [selfTimer, setSelfTimer] = useState(null);
   const [selfTimerShots, setSelfTimerShots] = useState(1);
   const [selfTimerDesc, setSelfTimerDesc] = useState(null);
+  const [appTimerDelay, setAppTimerDelay] = useState(() => {
+    const value = Number(localStorage.getItem(APP_TIMER_DELAY_KEY));
+    return [0, 2, 5, 10, 20].includes(value) ? value : 0;
+  });
+  const [appTimerShots, setAppTimerShots] = useState(() => {
+    const value = Number(localStorage.getItem(APP_TIMER_SHOTS_KEY));
+    return Number.isInteger(value) && value >= 1 && value <= 9 ? value : 1;
+  });
   const [propertyCapabilities, setPropertyCapabilities] = useState([]);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [propError, setPropError] = useState('');
@@ -360,8 +371,8 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
         <div className="flex items-center gap-2">
           <Timer size={14} className="text-[var(--blue)]" />
           <span className="text-[11px] font-semibold">{'\u81ea\u62cd\u5b9a\u65f6'}</span>
-          <span className={`ml-auto badge ${selfTimerSupported ? 'badge-blue' : 'badge-red'} mono`}>
-            {selfTimerSupported ? (selfTimer == null ? '--' : selfTimerLabel(selfTimer)) : '\u672a\u63d0\u4f9b'}
+          <span className="ml-auto badge badge-blue mono">
+            {appTimerDelay > 0 ? `\u5e94\u7528\u5185 ${appTimerDelay} \u79d2` : '\u5173\u95ed'}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2 mt-3">
@@ -369,32 +380,38 @@ export default function CameraControlPanel({ compact = false, onStateChange }) {
             <span className="text-[10px] text-[var(--text-muted)]">{'\u5ef6\u65f6'}</span>
             <select
               className="select mt-1"
-              value={selfTimerSupported ? (selfTimer ?? selfTimerOptions[0]) : ''}
-              disabled={!selfTimerSupported}
+              value={appTimerDelay}
               onChange={async event => {
                 const next = Number(event.target.value);
-                if (await setProp(PTP_PROP.NikonSelfTimer, next, '\u81ea\u62cd\u5b9a\u65f6')) setSelfTimer(next);
+                setAppTimerDelay(next);
+                localStorage.setItem(APP_TIMER_DELAY_KEY, String(next));
+                if (selfTimerSupported) {
+                  await setProp(PTP_PROP.NikonSelfTimer, next, '\u81ea\u62cd\u5b9a\u65f6');
+                }
               }}
             >
-              {selfTimerSupported
-                ? selfTimerOptions.map(value => <option key={value} value={value}>{selfTimerLabel(value)}</option>)
-                : <option value="">{'\u76f8\u673a\u672a\u63d0\u4f9b'}</option>}
+              <option value={0}>{'\u5173\u95ed'}</option>
+              <option value={2}>2 {'\u79d2'}</option>
+              <option value={5}>5 {'\u79d2'}</option>
+              <option value={10}>10 {'\u79d2'}</option>
+              <option value={20}>20 {'\u79d2'}</option>
             </select>
           </label>
           <label className="block">
             <span className="text-[10px] text-[var(--text-muted)]">{'\u62cd\u6444\u5f20\u6570'}</span>
             <select
               className="select mt-1"
-              value={selfTimerSupported ? selfTimerShots : ''}
-              disabled={!selfTimerSupported}
+              value={appTimerShots}
               onChange={async event => {
                 const next = Number(event.target.value);
-                if (await setProp(PTP_PROP.NikonSelfTimerShootNum, next, '\u81ea\u62cd\u5f20\u6570')) setSelfTimerShots(next);
+                setAppTimerShots(next);
+                localStorage.setItem(APP_TIMER_SHOTS_KEY, String(next));
+                if (selfTimerSupported) {
+                  await setProp(PTP_PROP.NikonSelfTimerShootNum, next, '\u81ea\u62cd\u5f20\u6570');
+                }
               }}
             >
-              {selfTimerSupported
-                ? Array.from({ length: 9 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)
-                : <option value="">{'\u672a\u63d0\u4f9b'}</option>}
+              {Array.from({ length: 9 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
         </div>

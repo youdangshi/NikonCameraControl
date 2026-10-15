@@ -264,6 +264,14 @@ function hexPreview(bytes, max = 96) {
     .join('');
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
 function isDirectoryObject(info) {
   return info?.formatCode === 0x3001
     || info?.associationType === 0x0001
@@ -1172,6 +1180,49 @@ export const camera = {
       return { dataUrl: bytesToDataUrl(payload, isJpeg ? 'image/jpeg' : 'application/octet-stream'), size: payload.length };
     }
     return fetchJSON('GET', `/api/image?handle=${handle}`);
+  },
+
+  /** 从相机读取原始文件（不使用缩略图），用于下载到手机。 */
+  async getOriginalData(handle, maxBytes = 200 * 1024 * 1024) {
+    if (demoCam) return demoCam.getImageData(handle);
+    if (mobileSession) {
+      const infoResp = await mobileSession.command(OC.GetObjectInfo, [handle], 8000).catch(() => null);
+      const knownSize = infoResp?.responseCode === 0x2001 ? parseObjectInfo(infoResp.payload)?.compressedSize || 0 : 0;
+      if (knownSize && knownSize > maxBytes) {
+        throw new Error(`文件过大（${formatBytes(knownSize)}），暂不支持直接下载到手机。`);
+      }
+      const full = await mobileSession.command(OC.GetObject, [handle], 180000);
+      if (full.responseCode !== 0x2001 || !full.payload?.length) {
+        throw new Error(`读取原图失败：PTP 0x${full.responseCode.toString(16)}`);
+      }
+      const payload = full.payload;
+      if (payload.length > maxBytes) {
+        throw new Error(`文件过大（${formatBytes(payload.length)}），暂不支持直接下载到手机。`);
+      }
+      const jpeg = payload.length >= 2 && payload[0] === 0xFF && payload[1] === 0xD8;
+      const mimeType = jpeg ? 'image/jpeg' : 'application/octet-stream';
+      return {
+        dataUrl: bytesToDataUrl(payload, mimeType),
+        mimeType,
+        size: payload.length,
+      };
+    }
+    return fetchJSON('GET', `/api/image?handle=${handle}`);
+  },
+
+  /** 把数据保存到 Android 相册或下载目录；浏览器则触发普通下载。 */
+  async saveMedia({ dataUrl, fileName = 'Nini-media.bin', mimeType = 'application/octet-stream' }) {
+    if (!dataUrl) throw new Error('没有可保存的数据。');
+    if (!isNativeMobile()) {
+      const anchor = document.createElement('a');
+      anchor.href = dataUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      return { success: true, web: true, fileName };
+    }
+    return CameraUi.saveToGallery({ dataUrl, fileName, mimeType });
   },
 
   /** 演示相机当前参数（取景界面上叠加显示） */

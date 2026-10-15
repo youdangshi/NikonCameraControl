@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App.jsx';
 import { camera } from '../api.js';
 import {
-  Camera, Film, Image as ImageIcon, Images, RefreshCw, SlidersHorizontal, Sparkles, X,
+  AlertCircle, Camera, CheckCircle2, Download, Film, Image as ImageIcon, Images, Loader2,
+  RefreshCw, SlidersHorizontal, Sparkles, X,
 } from 'lucide-react';
 
 const FILTERS = [
@@ -16,6 +17,15 @@ function isVideo(item) {
   return /\.(MOV|MP4|M4V|AVI)$/i.test(item.fileName || '');
 }
 
+function mimeTypeFor(item) {
+  const name = String(item?.fileName || '').toLowerCase();
+  if (name.endsWith('.mov')) return 'video/quicktime';
+  if (name.endsWith('.mp4') || name.endsWith('.m4v')) return 'video/mp4';
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.heic') || name.endsWith('.heif')) return 'image/heic';
+  return name.endsWith('.jpg') || name.endsWith('.jpeg') || !name ? 'image/jpeg' : 'application/octet-stream';
+}
+
 export default function CameraPhotosScreen() {
   const { state } = useContext(AppContext);
   const navigate = useNavigate();
@@ -24,6 +34,12 @@ export default function CameraPhotosScreen() {
   const [loadError, setLoadError] = useState('');
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [downloadingHandle, setDownloadingHandle] = useState(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null);
+  const [downloadNotice, setDownloadNotice] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+  const [savedHandles, setSavedHandles] = useState(() => new Set());
   const cancelledRef = useRef(false);
   const connected = state.connectionState === 'session_open';
 
@@ -70,6 +86,60 @@ export default function CameraPhotosScreen() {
     else setLoadError('未能读取照片原始数据，请重新连接相机后再试。');
   };
 
+  const saveOriginal = useCallback(async (img) => {
+    const original = await camera.getOriginalData(img.handle);
+    const fileName = img.fileName || `DSC_${img.handle}.JPG`;
+    const saved = await camera.saveMedia({
+      dataUrl: original.dataUrl,
+      fileName,
+      mimeType: original.mimeType || mimeTypeFor(img),
+    });
+    setSavedHandles(previous => {
+      const next = new Set(previous);
+      next.add(img.handle);
+      return next;
+    });
+    return { ...saved, fileName };
+  }, []);
+
+  const downloadOne = async (img) => {
+    if (!connected || downloadingHandle != null || batchBusy) return;
+    setDownloadingHandle(img.handle);
+    setDownloadError('');
+    setDownloadNotice('');
+    try {
+      const result = await saveOriginal(img);
+      setDownloadNotice(`已保存到手机：${result.fileName}`);
+    } catch (error) {
+      setDownloadError(`下载失败：${error?.message || error}`);
+    } finally {
+      setDownloadingHandle(null);
+    }
+  };
+
+  const downloadAll = async () => {
+    if (!connected || batchBusy || downloadingHandle != null || visibleImages.length === 0) return;
+    setBatchBusy(true);
+    setDownloadError('');
+    setDownloadNotice('');
+    let done = 0;
+    let failed = 0;
+    setBatchProgress({ done, total: visibleImages.length, failed });
+    for (const img of visibleImages) {
+      try {
+        await saveOriginal(img);
+        done += 1;
+      } catch {
+        failed += 1;
+      }
+      setBatchProgress({ done: done + failed, total: visibleImages.length, failed });
+    }
+    setBatchProgress(null);
+    setBatchBusy(false);
+    if (failed) setDownloadError(`批量下载完成：成功 ${done} 项，失败 ${failed} 项。`);
+    else setDownloadNotice(`批量下载完成：已保存 ${done} 项到手机。`);
+  };
+
   return (
     <div className="page">
       <div className="page-inner space-y-4 pb-24">
@@ -78,9 +148,14 @@ export default function CameraPhotosScreen() {
             <p className="section-label">相机媒体</p>
             <h1 className="text-xl font-bold mt-1">相机存储卡</h1>
           </div>
-          <button className="btn-icon" onClick={load} disabled={!connected || loading} aria-label="刷新">
-            <RefreshCw size={17} className={loading ? 'animate-spin' : ''} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button className="btn btn-secondary h-9 min-h-0 px-3 text-[10px]" onClick={downloadAll} disabled={!connected || loading || batchBusy || downloadingHandle != null || visibleImages.length === 0}>
+              {batchBusy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} 全部下载
+            </button>
+            <button className="btn-icon" onClick={load} disabled={!connected || loading || batchBusy} aria-label="刷新">
+              <RefreshCw size={17} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
         </div>
 
         {!connected ? (
@@ -106,6 +181,18 @@ export default function CameraPhotosScreen() {
             {loadError && (
               <div className="panel px-4 py-3 text-[11px] leading-5 text-[#ffb4b4]">{loadError}</div>
             )}
+            {batchProgress && (
+              <div className="panel px-4 py-3 text-[11px] text-[var(--text-soft)] flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" /> 正在下载 {batchProgress.done}/{batchProgress.total}
+                {batchProgress.failed > 0 && ` · 失败 ${batchProgress.failed}`}
+              </div>
+            )}
+            {downloadNotice && (
+              <div className="panel px-4 py-3 text-[11px] leading-5 text-[var(--green)] flex items-center gap-2"><CheckCircle2 size={14} /> {downloadNotice}</div>
+            )}
+            {downloadError && (
+              <div className="panel px-4 py-3 text-[11px] leading-5 text-[#ffb4b4] flex items-center gap-2"><AlertCircle size={14} /> {downloadError}</div>
+            )}
 
             {visibleImages.length === 0 ? (
               <section className="panel py-20 px-6 text-center">
@@ -127,6 +214,16 @@ export default function CameraPhotosScreen() {
                     <span className="absolute left-1 bottom-1 px-1.5 py-0.5 rounded bg-black/70 text-[8px] font-semibold text-white/90">
                       {isVideo(img) ? 'VIDEO' : 'JPEG'}
                     </span>
+                    {savedHandles.has(img.handle) && (
+                      <span className="absolute right-1 top-1 w-5 h-5 rounded-full bg-[var(--green)] text-black flex items-center justify-center">
+                        <CheckCircle2 size={13} />
+                      </span>
+                    )}
+                    {downloadingHandle === img.handle && (
+                      <span className="absolute inset-0 bg-black/55 flex items-center justify-center">
+                        <Loader2 size={20} className="animate-spin text-white" />
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -147,8 +244,12 @@ export default function CameraPhotosScreen() {
               </div>
               <button className="btn-icon" onClick={() => setSelected(null)} aria-label="关闭"><X size={16} /></button>
             </div>
-            <div className="grid grid-cols-3 gap-2 mt-3">
-              <button className="btn btn-primary" onClick={() => openEditor(selected)}><SlidersHorizontal size={15} /> 修图</button>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <button className="btn btn-primary" onClick={() => downloadOne(selected)} disabled={downloadingHandle != null || batchBusy}>
+                {downloadingHandle === selected.handle ? <Loader2 size={15} className="animate-spin" /> : savedHandles.has(selected.handle) ? <CheckCircle2 size={15} /> : <Download size={15} />}
+                {savedHandles.has(selected.handle) ? '已保存到手机' : '下载到手机'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => openEditor(selected)}><SlidersHorizontal size={15} /> 修图</button>
               <button className="btn btn-secondary" onClick={() => navigate('/local')}><Sparkles size={15} /> AI 分析</button>
               <button className="btn btn-secondary" onClick={() => navigate('/liveview')}><Camera size={15} /> 继续拍摄</button>
             </div>

@@ -6,7 +6,7 @@ export const appUpdater = {
   isNative: () => Capacitor.isNativePlatform(),
 
   async getAppInfo() {
-    if (!Capacitor.isNativePlatform()) return { versionName: '1.12.2', versionCode: 32 };
+    if (!Capacitor.isNativePlatform()) return { versionName: '1.12.3', versionCode: 33 };
     return AppUpdater.getAppInfo();
   },
 

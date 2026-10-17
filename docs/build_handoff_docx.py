@@ -7,7 +7,9 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-OUT = r"C:\Users\李\Desktop\项目组\nikon-camera-control\docs\Nikon_Camera_Control_交接文档.docx"
+from pathlib import Path
+
+OUT = str(Path(__file__).resolve().parent / "Nikon_Camera_Control_交接文档.docx")
 
 doc = Document()
 sec = doc.sections[0]
@@ -286,8 +288,8 @@ numbered("cd android && ./gradlew assembleDebug")
 numbered("输出：app/android/app/build/outputs/apk/debug/app-debug.apk")
 
 heading("9. 本机工具链与注意")
-bullet("JDK 21：C:\\Users\\李\\.jdks\\jdk-21.0.2（用 JAVA_HOME 传入，不要写进 gradle.properties）。")
-bullet("Android SDK：C:\\Users\\Public\\AndroidSdk 是指向 C:\\Users\\李\\Android 的 ASCII junction。")
+bullet("JDK 21：用 JAVA_HOME 指向本机 JDK 21 安装目录，不要写进 gradle.properties。")
+bullet("Android SDK：用 ANDROID_HOME 或 local.properties 指向本机 SDK，位置因人而异。")
 bullet("Windows 中文路径需 android.overridePathCheck=true。")
 bullet("Gradle 8.14.3 zip 已缓存；以上均为本机信息，不上传。")
 

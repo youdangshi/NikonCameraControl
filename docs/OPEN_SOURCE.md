@@ -9,10 +9,10 @@
 使用：
 
 ```text
-C:\Users\李\Desktop\项目组\nikon-camera-control
+nikon-camera-control/
 ```
 
-作为 GitHub 仓库根目录。`README.md`、`LICENSE`、`docs/` 与本目录 `.gitignore` 已放入。
+作为 GitHub 仓库根目录（本机绝对路径因人而异，按实际 clone 位置替换）。`README.md`、`LICENSE`、`docs/` 与本目录 `.gitignore` 已放入。
 
 ## 2. 上传白名单
 
@@ -65,7 +65,7 @@ C:\Users\李\Desktop\项目组\nikon-camera-control
 
 ## 5. 参考 APK 的处理
 
-附件 `C:/Users/李/Desktop/app-release.apk.1` 是第三方/CameraSyncPro 参考安装包，**不能**上传到本项目仓库。我们在功能设计上参考了它的 `GridOverlay` / `live_view_overlays` 架构思路，但实现代码是原创。不要复制其二进制、资源或受版权保护的素材。
+本地保存的参考安装包是第三方软件，**不能**上传到本项目仓库。我们在功能设计上参考了它的 `GridOverlay` / `live_view_overlays` 架构思路，但实现代码是原创。不要复制其二进制、资源或受版权保护的素材。
 
 ## 6. 推送前检查命令
 

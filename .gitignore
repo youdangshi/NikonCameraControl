@@ -61,8 +61,8 @@ AGENTS.md
 .codex/
 .agent-teams/
 .playwright-cli/
-docs/Nikon_Camera_Control_交接文档.docx
-docs/Nikon_Camera_Control_项目介绍.docx
+docs/*.docx
+*.docx
 app/android/app/src/test/
 app/android/app/src/androidTest/
 
@@ -74,6 +74,8 @@ app-release.apk*
 *.apk.1
 
 # ── IDE / 操作系统 ────────────────────────────────────────
+__pycache__/
+*.pyc
 .vscode/
 .idea/
 *.iml

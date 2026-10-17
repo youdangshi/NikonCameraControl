@@ -7,7 +7,9 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-OUT = r"C:\Users\李\Desktop\项目组\nikon-camera-control\docs\Nikon_Camera_Control_项目介绍.docx"
+from pathlib import Path
+
+OUT = str(Path(__file__).resolve().parent / "Nikon_Camera_Control_项目介绍.docx")
 
 doc = Document()
 sec = doc.sections[0]

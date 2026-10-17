@@ -12,7 +12,7 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 仓库目录 | `C:\Users\李\Desktop\项目组\nikon-camera-control`（独立 git 仓库，不是父目录） |
+| 仓库目录 | 本机 `nikon-camera-control/`（独立 git 仓库，不是父目录） |
 | 远端 | https://github.com/youdangshi/NikonCameraControl |
 | 分支 | 本地 `master`，远端 `main`，推送用 `master:main` |
 | 最新提交 | `944e6ff`（README 文档），发版提交 `5b89406` |
@@ -31,7 +31,7 @@
 
 ## 2. 环境与硬约束
 
-- 开发机是 Windows，终端用 PowerShell。工作区根目录 `C:\Users\李\Desktop\项目组`。
+- 开发机是 Windows，终端用 PowerShell。下文用 `<仓库根目录>` 表示本机 clone 位置，按实际路径替换。
 - 本机 git 直连 github.com 会失败，必须走代理：
   `git -c http.version=HTTP/1.1 -c http.proxy=http://127.0.0.1:7897 push origin master:main`
 - GitHub Token 曾被粘贴在对话里。不要把 Token 写进 remote URL、源码、文档或提交；需要鉴权时用本机已保存的凭据。
@@ -113,7 +113,7 @@ nikon-camera-control/
 ## 7. 接手第一步（照着跑）
 
 ```powershell
-cd C:\Users\李\Desktop\项目组\nikon-camera-control\app
+cd <仓库根目录>\app
 npm ci
 npm run test:all
 npx vite build --configLoader runner
@@ -157,4 +157,4 @@ adb install -r app\android\app\build\outputs\apk\debug\app-debug.apk
 
 把下面这段直接发给接手的智能体：
 
-> 你要接手“妮妮 Nini”Android 相机控制项目，仓库在 `C:\Users\李\Desktop\项目组\nikon-camera-control`。先完整阅读 `HANDOFF.md`，再读 `README.md` 与 `app/src/api.js`。动手前先跑 `cd app; npm run test:all` 确认基线是绿的。真实主线是 Nikon Z30 + Android 手机，没有硬件时不要假装验证过真机行为。修改版本号要同步四处，发版提交信息必须含 `[release]`，推送走代理并推到 `origin master:main`。不要提交 Token、APK、个人照片或本机路径。
+> 你要接手“妮妮 Nini”Android 相机控制项目，先完整阅读仓库根目录的 `HANDOFF.md`，再读 `README.md` 与 `app/src/api.js`。动手前先跑 `cd app; npm run test:all` 确认基线是绿的。真实主线是 Nikon Z30 + Android 手机，没有硬件时不要假装验证过真机行为。修改版本号要同步四处，发版提交信息必须含 `[release]`，推送走代理并推到 `origin master:main`。不要提交 Token、APK、个人照片或本机路径。
